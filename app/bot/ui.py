@@ -14,7 +14,13 @@ from aiogram import Bot
 from aiogram.exceptions import TelegramAPIError, TelegramBadRequest
 from aiogram.filters import Filter
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup, MaybeInaccessibleMessage, Message
+from aiogram.types import (
+    CallbackQuery,
+    InlineKeyboardMarkup,
+    MaybeInaccessibleMessage,
+    Message,
+    TelegramObject,
+)
 
 from app.bot import texts
 from app.bot.keyboards.common import main_menu
@@ -121,10 +127,15 @@ async def finish(
     text: str,
     reply_markup: InlineKeyboardMarkup | None = None,
 ) -> None:
-    """End a scenario: the result goes in a new message, then the main menu (TZ 11)."""
-    await reset_scenario(state, bot, chat_id)
+    """End a scenario: the result goes in a new message, then the main menu (TZ 11).
+
+    The scenario is cleared only after the result is delivered: if Telegram fails in
+    between, the user can press "Сохранить" again and gets the same record back (the
+    request_id makes the repeat safe).
+    """
     await bot.send_message(chat_id, text, reply_markup=reply_markup)
     await bot.send_message(chat_id, texts.MAIN_MENU, reply_markup=main_menu(user))
+    await reset_scenario(state, bot, chat_id)
 
 
 class OnScreen(Filter):
@@ -150,3 +161,13 @@ def chat_id_of(event: Message | CallbackQuery) -> int:
     if isinstance(event, Message):
         return event.chat.id
     return event.message.chat.id if event.message is not None else event.from_user.id
+
+
+class FlowOf(Filter):
+    """Passes when the active record scenario is of one of the given types."""
+
+    def __init__(self, *op_types: str) -> None:
+        self.op_types = {str(op_type) for op_type in op_types}
+
+    async def __call__(self, event: TelegramObject, state: FSMContext) -> bool:
+        return (await state.get_data()).get("op_type") in self.op_types

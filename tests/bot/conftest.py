@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from app.bot.dispatcher import create_dispatcher
 from app.config import Settings
+from app.db.models import User
 from app.db.session import create_sessionmaker
 from app.services import users
 from tests.bot.harness import BOT_TOKEN, FakeTelegram, Harness, JsonMemoryStorage, UserClient
@@ -55,3 +56,10 @@ async def harness(
 @pytest.fixture
 def owner_client(harness: Harness) -> UserClient:
     return harness.user(OWNER_TG_ID, username="boss", first_name="Владелец")
+
+
+@pytest.fixture
+async def owner_user(harness: Harness, session: AsyncSession) -> User:
+    user = await users.get_active_by_telegram_id(session, OWNER_TG_ID)
+    assert user is not None
+    return user

@@ -61,3 +61,42 @@ class ClientsCb(CallbackData, prefix="c"):
     action: ClientsAction
     client_id: int = 0
     page: int = 0
+
+
+class OpAction(StrEnum):
+    CLIENT = "cl"
+    SEARCH = "sr"
+    RESULTS = "rs"
+    NEW_CLIENT = "nc"
+    SKIP_CLIENT_COMMENT = "skc"
+    CURRENCY = "cur"
+    SAME_CURRENCY = "same"
+    OTHER_CURRENCY = "oth"
+    PAY_CURRENCY = "pc"
+    TODAY = "td"
+    YESTERDAY = "yd"
+    OTHER_DATE = "od"
+    SKIP_COMMENT = "sk"
+    SAVE = "save"
+    DONT_SAVE = "no"
+    BACK = "back"
+
+
+class OpCb(CallbackData, prefix="o"):
+    """Steps of the record scenarios; valid only on the current scenario screen."""
+
+    action: OpAction
+    value: str = ""
+
+
+class RecordAction(StrEnum):
+    OPEN = "op"
+    CLIENT = "cl"
+    REVERSE = "rv"
+
+
+class RecordCb(CallbackData, prefix="r"):
+    """Record card: works from any message (results, history, notifications)."""
+
+    action: RecordAction
+    operation_id: int

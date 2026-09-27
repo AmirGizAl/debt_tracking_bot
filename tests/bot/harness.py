@@ -105,6 +105,11 @@ def plain(text: str) -> str:
     return html.unescape(STRIP_TAGS_RE.sub("", text))
 
 
+def readable(text: str) -> str:
+    """No-break spaces become plain ones to keep assertions readable."""
+    return text.replace("\u00a0", " ")
+
+
 @dataclass
 class FakeMessage:
     chat_id: int
@@ -117,14 +122,14 @@ class FakeMessage:
 
     @property
     def text(self) -> str:
-        """Visible text; no-break spaces become plain ones to keep assertions readable."""
-        return plain(self.html).replace("\u00a0", " ")
+        """Visible text with plain spaces (see `readable`)."""
+        return readable(plain(self.html))
 
     @property
     def buttons(self) -> list[list[str]]:
         if self.markup is None:
             return []
-        return [[button.text for button in row] for row in self.markup.inline_keyboard]
+        return [[readable(button.text) for button in row] for row in self.markup.inline_keyboard]
 
     @property
     def button_texts(self) -> list[str]:
@@ -135,7 +140,7 @@ class FakeMessage:
             return None
         for row in self.markup.inline_keyboard:
             for button in row:
-                if button.text == button_text:
+                if readable(button.text) == button_text:
                     return button.callback_data
         return None
 
