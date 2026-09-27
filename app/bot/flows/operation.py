@@ -245,13 +245,12 @@ async def show_rate(
     assert flow.amount is not None and flow.debt_currency is not None
     base, quote = flow.rate_pair
     paid = format_money(flow.amount, flow.cash_currency)
-    text = (
-        f"{header(flow)}\nОплата: {paid}, долг в {flow.debt_currency}.\n\n"
-        f"<b>{texts.rate_question(base, quote)}</b>"
-    )
+    parts = [f"{header(flow)}\nОплата: {paid}, долг в {flow.debt_currency}."]
     if problem:
-        text = f"{problem}\n\n{text}"
+        parts.append(problem)
+    parts.append(f"<b>{texts.rate_question(base, quote)}</b>")
     await state.set_state(OperationFlow.rate)
+    text = "\n\n".join(parts)
     await show_step(event, state, bot, text, kb.back_only())
 
 
