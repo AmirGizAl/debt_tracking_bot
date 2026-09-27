@@ -49,7 +49,6 @@ BTN_NEXT_PAGE = "›"
 
 STALE_ACTION = "Это действие устарело"
 ACTION_CANCELLED = "Действие отменено."
-NOT_IMPLEMENTED = "Раздел пока в разработке."
 PERMISSION_DENIED = "Недостаточно прав для этого действия."
 UNEXPECTED_INPUT = "Не понял сообщение. Воспользуйтесь кнопками выше или нажмите /menu."
 UNEXPECTED_ERROR = "Произошла ошибка. Попробуйте ещё раз или нажмите /menu."
@@ -780,7 +779,6 @@ PERIOD_END_BEFORE_START = "Конец периода не может быть р
 RATES_INTRO = "Укажите курсы для пересчёта кассы в сомы."
 STATEMENT_CLIENT_QUESTION = "По какому клиенту нужна выписка?"
 STATEMENT_NO_CLIENTS = "Клиентов пока нет."
-REPORT_FAILED = "Не получилось сформировать отчёт. Попробуйте ещё раз или нажмите /menu."
 
 REPORT_TITLES = {
     "summary": "Общая сводка",

@@ -2,12 +2,15 @@
 
 Полная спецификация находится в `TZ.md`. Прочитай её перед любой задачей в этом репозитории.
 Описание для заказчика с примерами экранов лежит в `docs/client_description.pdf`. Если оно расходится с `TZ.md`, приоритет у `TZ.md`.
+Решения по местам, которые ТЗ не описывает (в том числе согласованные с заказчиком), собраны в `docs/decisions.md`.
 
 ## Команды
 
 - Установка для разработки: `pip install -e ".[dev]"`
 - Линтер и форматтер: `ruff check . && ruff format --check .`
 - Тесты: `pytest`. Нужен PostgreSQL, адрес задаётся в `TEST_DATABASE_URL`.
+  Тестовая база: `docker compose -f docker-compose.test.yml up -d`,
+  `TEST_DATABASE_URL=postgresql+asyncpg://debtbot:debtbot@localhost:55432/debtbot_test`.
 - Новая миграция: `alembic revision --autogenerate -m "..."`. Обязательно проверь сгенерированный файл вручную: триггеры и частичные индексы autogenerate не видит.
 - Применить миграции: `alembic upgrade head`
 - Запуск: `docker compose up -d --build`

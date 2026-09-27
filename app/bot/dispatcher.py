@@ -76,7 +76,9 @@ def create_dispatcher(
 
     dispatcher.include_routers(
         errors.router,
+        # Commands first: /menu and /cancel must win over any step that waits for text.
         start.router,
+        menu.router,
         settings_handlers.router,
         clients.router,
         lend_borrow.router,
@@ -85,7 +87,6 @@ def create_dispatcher(
         operation_card.router,
         cash.router,
         reports.router,
-        menu.router,
         fallback.router,
     )
     return dispatcher

@@ -1,6 +1,7 @@
 import asyncio
 import logging
 
+from aiogram.exceptions import TelegramUnauthorizedError
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncEngine
@@ -32,17 +33,24 @@ async def run() -> None:
     setup_logging(settings.log_level, settings.zone)
     engine = create_engine(settings.database_url)
     sessionmaker = create_sessionmaker(engine)
+    bot = create_bot(settings)
     try:
         await wait_for_database(engine)
         async with sessionmaker() as session:
             await users.ensure_owner(session, settings.owner_telegram_id)
-
-        bot = create_bot(settings)
         dispatcher = create_dispatcher(settings, sessionmaker, create_storage(settings))
         await prepare_bot(bot)
         logger.info("Bot started, owner telegram_id=%s", settings.owner_telegram_id)
-        await dispatcher.start_polling(bot, allowed_updates=dispatcher.resolve_used_update_types())
+        await dispatcher.start_polling(
+            bot,
+            allowed_updates=dispatcher.resolve_used_update_types(),
+            close_bot_session=False,
+        )
+    except TelegramUnauthorizedError:
+        logger.error("Telegram rejected BOT_TOKEN: check the token from @BotFather in .env")
+        raise SystemExit(1) from None
     finally:
+        await bot.session.close()
         await engine.dispose()
 
 
