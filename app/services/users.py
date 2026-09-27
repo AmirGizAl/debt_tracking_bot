@@ -6,26 +6,16 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import User, UserRole, UserStatus
-from app.domain.errors import DomainError, NotFound, PermissionDenied
+from app.domain.errors import (
+    CannotDeleteOwner,
+    InvalidUsername,
+    PermissionDenied,
+    UsernameAlreadyAdded,
+    UserNotFound,
+)
 
 USERNAME_RE = re.compile(r"^[a-z0-9_]{5,32}$")
 FULL_NAME_MAX = 200
-
-
-class InvalidUsername(DomainError):
-    pass
-
-
-class UsernameAlreadyAdded(DomainError):
-    pass
-
-
-class CannotDeleteOwner(DomainError):
-    pass
-
-
-class UserNotFound(NotFound):
-    pass
 
 
 def _now() -> datetime:

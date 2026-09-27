@@ -13,6 +13,7 @@ from app.bot.states import HelperFlow
 from app.bot.ui import answer, drop_keyboard, edit_or_send, finish, leave_scenario, show_step
 from app.config import Settings
 from app.db.models import User
+from app.domain import errors
 from app.services import users
 
 router = Router(name="settings")
@@ -65,10 +66,10 @@ async def receive_username(
     assert message.text is not None
     try:
         helper = await users.add_helper(session, user, message.text)
-    except users.InvalidUsername:
+    except errors.InvalidUsername:
         await show_step(message, state, bot, texts.INVALID_USERNAME, kb.ask_username())
         return
-    except users.UsernameAlreadyAdded:
+    except errors.UsernameAlreadyAdded:
         await show_step(message, state, bot, texts.USERNAME_ALREADY_ADDED, kb.ask_username())
         return
     assert helper.username is not None
@@ -89,7 +90,7 @@ async def open_helper(
         return
     try:
         helper = await users.get_helper(session, user, callback_data.helper_id)
-    except users.UserNotFound:
+    except errors.UserNotFound:
         await answer(callback, texts.STALE_ACTION)
         return
     await leave_scenario(callback, state, bot)
@@ -113,7 +114,7 @@ async def ask_delete_confirmation(
         return
     try:
         helper = await users.get_helper(session, user, callback_data.helper_id)
-    except users.UserNotFound:
+    except errors.UserNotFound:
         await answer(callback, texts.STALE_ACTION)
         return
     await leave_scenario(callback, state, bot)
@@ -137,10 +138,10 @@ async def delete_helper(
     assert callback.message is not None
     try:
         helper = await users.delete_helper(session, user, callback_data.helper_id)
-    except users.UserNotFound:
+    except errors.UserNotFound:
         await answer(callback, texts.STALE_ACTION)
         return
-    except users.CannotDeleteOwner:
+    except errors.CannotDeleteOwner:
         await answer(callback, texts.CANNOT_DELETE_OWNER, alert=True)
         return
     if helper.telegram_id is not None:

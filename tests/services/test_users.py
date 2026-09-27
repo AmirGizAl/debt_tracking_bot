@@ -3,7 +3,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import User, UserRole, UserStatus
-from app.domain.errors import PermissionDenied
+from app.domain import errors
 from app.services import users
 
 
@@ -68,7 +68,7 @@ def test_normalize_username(raw: str, expected: str) -> None:
     "raw", ["", "@", "aig", "a" * 33, "aigul k", "айгуль_k", "@@aigul_k", "aigul-k", "aigul.k"]
 )
 def test_normalize_username_rejects_invalid(raw: str) -> None:
-    with pytest.raises(users.InvalidUsername):
+    with pytest.raises(errors.InvalidUsername):
         users.normalize_username(raw)
 
 
@@ -87,7 +87,7 @@ async def test_add_helper_rejects_duplicate_ignoring_case(
 ) -> None:
     await users.add_helper(session, owner, "aigul_k")
 
-    with pytest.raises(users.UsernameAlreadyAdded):
+    with pytest.raises(errors.UsernameAlreadyAdded):
         await users.add_helper(session, owner, "@AIGUL_K")
 
 
@@ -158,7 +158,7 @@ async def test_re_adding_deleted_helper_restores_the_same_row(
 
 
 async def test_owner_cannot_be_deleted(session: AsyncSession, owner: User) -> None:
-    with pytest.raises(users.CannotDeleteOwner):
+    with pytest.raises(errors.CannotDeleteOwner):
         await users.delete_helper(session, owner, owner.id)
 
 
@@ -173,9 +173,9 @@ async def test_list_helpers_hides_deleted(session: AsyncSession, owner: User) ->
 
 
 async def test_helper_cannot_manage_helpers(session: AsyncSession, helper: User) -> None:
-    with pytest.raises(PermissionDenied):
+    with pytest.raises(errors.PermissionDenied):
         await users.add_helper(session, helper, "bekzat_b")
-    with pytest.raises(PermissionDenied):
+    with pytest.raises(errors.PermissionDenied):
         await users.list_helpers(session, helper)
-    with pytest.raises(PermissionDenied):
+    with pytest.raises(errors.PermissionDenied):
         await users.delete_helper(session, helper, helper.id)

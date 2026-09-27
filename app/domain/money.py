@@ -1,14 +1,55 @@
-"""Parsing and formatting of amounts and rates. Money is Decimal only, never float."""
+"""Parsing and formatting of amounts and rates (TZ 4.2-4.4). Decimal only, never float."""
 
+import re
 from decimal import ROUND_HALF_UP, Decimal
 
+from app.domain.errors import InvalidNumber, NumberProblem
+
 CENT = Decimal("0.01")
+MAX_AMOUNT = Decimal("999999999999.99")
+MAX_RATE = Decimal("999999999999.999999")  # NUMERIC(18,6)
+AMOUNT_PLACES = 2
+RATE_PLACES = 6
+
 NBSP = " "
 MINUS = "−"  # typographic minus, as in the spec: "−500 USD"
+
+_SPACES = re.compile(r"\s+")  # any Unicode space, including no-break ones
+_NUMBER = re.compile(r"[0-9]+(?:\.([0-9]+))?")
 
 
 def quantize_money(value: Decimal) -> Decimal:
     return value.quantize(CENT, rounding=ROUND_HALF_UP)
+
+
+def _parse_positive(text: str, places: int, maximum: Decimal) -> Decimal:
+    cleaned = _SPACES.sub("", text).replace(",", ".")
+    negative = cleaned[:1] in ("-", MINUS)
+    if negative:
+        cleaned = cleaned[1:]
+    match = _NUMBER.fullmatch(cleaned)
+    if match is None:
+        raise InvalidNumber(NumberProblem.FORMAT)
+    fraction = match.group(1)
+    if fraction is not None and len(fraction) > places:
+        # More digits than allowed is a typo, not something to round (TZ 4.2).
+        raise InvalidNumber(NumberProblem.PRECISION)
+    value = Decimal(cleaned)
+    if negative or value <= 0:
+        raise InvalidNumber(NumberProblem.NOT_POSITIVE)
+    if value > maximum:
+        raise InvalidNumber(NumberProblem.TOO_LARGE)
+    return value
+
+
+def parse_amount(text: str) -> Decimal:
+    """'1 000,50' -> Decimal('1000.50'). Raises InvalidNumber."""
+    return quantize_money(_parse_positive(text, AMOUNT_PLACES, MAX_AMOUNT))
+
+
+def parse_rate(text: str) -> Decimal:
+    """'87,5' -> Decimal('87.5'); up to six decimal places. Raises InvalidNumber."""
+    return _parse_positive(text, RATE_PLACES, MAX_RATE)
 
 
 def _group_thousands(digits: str, sep: str) -> str:

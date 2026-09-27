@@ -9,9 +9,9 @@ from decimal import Decimal
 from html import escape
 
 from app.db.models import Client, User, UserStatus
-from app.domain.currency import Currency
+from app.domain.currency import HOME_CURRENCY, Currency
 from app.domain.dates import format_date
-from app.domain.money import format_amount, format_money
+from app.domain.money import format_amount, format_money, format_rate
 
 
 def esc(value: object) -> str:
@@ -262,3 +262,17 @@ def confirm_delete_client(name: str) -> str:
 
 def client_deleted(name: str) -> str:
     return f"Клиент «{esc(name)}» удалён."
+
+
+# --- Rates (TZ 4.5) -------------------------------------------------------------------------
+
+
+def rate_question(base: Currency, quote: Currency) -> str:
+    """ "Сколько сомов за 1 USD?" / "Сколько RUB за 1 EUR?"."""
+    quote_name = "сомов" if quote == HOME_CURRENCY else quote
+    return f"Сколько {quote_name} за 1 {base}?"
+
+
+def rate_text(rate: Decimal, base: Currency, quote: Currency) -> str:
+    """ "1 USD = 87,5 KGS"."""
+    return f"1 {base} = {format_rate(rate)} {quote}"

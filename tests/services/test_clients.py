@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Client, User
+from app.domain import errors
 from app.domain.currency import Currency
 from app.domain.operations import OperationType
 from app.services import balances, clients
@@ -17,7 +18,7 @@ def test_normalize_name_trims_and_collapses_spaces() -> None:
 
 @pytest.mark.parametrize(("raw", "too_long"), [("   ", False), ("", False), ("я" * 101, True)])
 def test_normalize_name_rejects(raw: str, too_long: bool) -> None:
-    with pytest.raises(clients.InvalidClientName) as error:
+    with pytest.raises(errors.InvalidClientName) as error:
         clients.normalize_name(raw)
     assert error.value.too_long is too_long
 
@@ -40,7 +41,7 @@ async def test_duplicate_name_is_rejected_ignoring_case(
 ) -> None:
     await clients.create_client(session, owner, "Иван")
 
-    with pytest.raises(clients.DuplicateClientName) as error:
+    with pytest.raises(errors.DuplicateClientName) as error:
         await clients.create_client(session, owner, duplicate)
     assert error.value.existing_name == "Иван"
 
@@ -51,7 +52,7 @@ async def test_rename_checks_uniqueness_but_allows_own_case_change(
     ivan = await clients.create_client(session, owner, "Иван")
     await clients.create_client(session, owner, "Азамат")
 
-    with pytest.raises(clients.DuplicateClientName):
+    with pytest.raises(errors.DuplicateClientName):
         await clients.rename_client(session, ivan.id, "азамат")
     renamed = await clients.rename_client(session, ivan.id, "ИВАН")
     assert renamed.name == "ИВАН"
@@ -61,7 +62,7 @@ async def test_comment_limits(session: AsyncSession, owner: User) -> None:
     client = await clients.create_client(session, owner, "Иван", "я" * 1000)
     assert client.comment == "я" * 1000
 
-    with pytest.raises(clients.CommentTooLong):
+    with pytest.raises(errors.TextTooLong):
         await clients.update_comment(session, client.id, "я" * 1001)
     cleared = await clients.update_comment(session, client.id, "   ")
     assert cleared.comment is None
@@ -80,7 +81,7 @@ async def test_client_with_operations_cannot_be_deleted(session: AsyncSession, o
     await make_operation(session, owner, client, OperationType.LEND, "100")
 
     assert await clients.has_operations(session, client.id)
-    with pytest.raises(clients.ClientHasOperations):
+    with pytest.raises(errors.ClientHasOperations):
         await clients.delete_client(session, client.id)
 
 

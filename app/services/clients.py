@@ -5,38 +5,18 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Client, Operation, User
-from app.domain.errors import DomainError, NotFound
+from app.domain.errors import (
+    ClientHasOperations,
+    ClientNotFound,
+    DuplicateClientName,
+    InvalidClientName,
+    TextTooLong,
+)
 from app.services.pagination import Page, paginate
 
 NAME_MAX = 100
 COMMENT_MAX = 1000
 RECENT_LIMIT = 6
-
-
-class InvalidClientName(DomainError):
-    def __init__(self, too_long: bool) -> None:
-        super().__init__("too long" if too_long else "empty")
-        self.too_long = too_long
-
-
-class CommentTooLong(DomainError):
-    def __init__(self, limit: int) -> None:
-        super().__init__(f"longer than {limit}")
-        self.limit = limit
-
-
-class DuplicateClientName(DomainError):
-    def __init__(self, existing_name: str) -> None:
-        super().__init__(existing_name)
-        self.existing_name = existing_name
-
-
-class ClientHasOperations(DomainError):
-    pass
-
-
-class ClientNotFound(NotFound):
-    pass
 
 
 def normalize_name(raw: str) -> str:
@@ -50,11 +30,12 @@ def normalize_name(raw: str) -> str:
 
 
 def normalize_comment(raw: str | None, limit: int) -> str | None:
+    """Optional free text: blank becomes None, longer than `limit` is an error."""
     comment = (raw or "").strip()
     if not comment:
         return None
     if len(comment) > limit:
-        raise CommentTooLong(limit)
+        raise TextTooLong(limit)
     return comment
 
 

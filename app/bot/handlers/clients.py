@@ -20,6 +20,7 @@ from app.bot.ui import (
     show_step,
 )
 from app.db.models import Client, User
+from app.domain import errors
 from app.services import balances, clients
 
 router = Router(name="clients")
@@ -34,12 +35,12 @@ async def _client_or_stale(
 ) -> Client | None:
     try:
         return await clients.get_client(session, client_id)
-    except clients.ClientNotFound:
+    except errors.ClientNotFound:
         await answer(callback, texts.STALE_ACTION)
         return None
 
 
-def _name_error(error: clients.InvalidClientName) -> str:
+def _name_error(error: errors.InvalidClientName) -> str:
     return texts.CLIENT_NAME_TOO_LONG if error.too_long else texts.CLIENT_NAME_EMPTY
 
 
@@ -169,10 +170,10 @@ async def receive_name(
     assert message.text is not None
     try:
         name = await clients.check_name_available(session, message.text)
-    except clients.InvalidClientName as error:
+    except errors.InvalidClientName as error:
         await show_step(message, state, bot, _name_error(error), kb.back_to_list())
         return
-    except clients.DuplicateClientName as error:
+    except errors.DuplicateClientName as error:
         await show_step(
             message, state, bot, texts.duplicate_client(error.existing_name), kb.back_to_list()
         )
@@ -194,10 +195,10 @@ async def _create_client(
     name = (await state.get_data())["name"]
     try:
         client = await clients.create_client(session, user, name, comment)
-    except clients.CommentTooLong as error:
+    except errors.TextTooLong as error:
         await show_step(event, state, bot, texts.comment_too_long(error.limit), kb.ask_comment())
         return
-    except clients.DuplicateClientName as error:
+    except errors.DuplicateClientName as error:
         await state.set_state(ClientsFlow.add_name)
         await show_step(
             event, state, bot, texts.duplicate_client(error.existing_name), kb.back_to_list()
@@ -272,10 +273,10 @@ async def receive_new_name(
     client_id = (await state.get_data())["client_id"]
     try:
         client = await clients.rename_client(session, client_id, message.text)
-    except clients.InvalidClientName as error:
+    except errors.InvalidClientName as error:
         await show_step(message, state, bot, _name_error(error), kb.back_to_edit(client_id))
         return
-    except clients.DuplicateClientName as error:
+    except errors.DuplicateClientName as error:
         await show_step(
             message,
             state,
@@ -284,7 +285,7 @@ async def receive_new_name(
             kb.back_to_edit(client_id),
         )
         return
-    except clients.ClientNotFound:
+    except errors.ClientNotFound:
         await finish(bot, state, message.chat.id, user, texts.CLIENT_NOT_FOUND)
         return
     await finish(
@@ -333,12 +334,12 @@ async def _save_comment(
     client_id = (await state.get_data())["client_id"]
     try:
         client = await clients.update_comment(session, client_id, comment)
-    except clients.CommentTooLong as error:
+    except errors.TextTooLong as error:
         await show_step(
             event, state, bot, texts.comment_too_long(error.limit), kb.edit_comment(client_id, True)
         )
         return
-    except clients.ClientNotFound:
+    except errors.ClientNotFound:
         await finish(bot, state, chat_id, user, texts.CLIENT_NOT_FOUND)
         return
     result = texts.COMMENT_SAVED if client.comment else texts.COMMENT_REMOVED
@@ -399,10 +400,10 @@ async def delete_client(
     assert callback.message is not None
     try:
         client = await clients.delete_client(session, callback_data.client_id)
-    except clients.ClientNotFound:
+    except errors.ClientNotFound:
         await answer(callback, texts.STALE_ACTION)
         return
-    except clients.ClientHasOperations:
+    except errors.ClientHasOperations:
         await answer(callback, texts.CLIENT_HAS_OPERATIONS, alert=True)
         return
     await answer(callback)
