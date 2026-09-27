@@ -754,3 +754,54 @@ def helper_cancelled_notice(helper: User, operation: Operation, reason: str) -> 
             f"Причина: {esc(reason)}",
         ]
     )
+
+
+# --- Reports (TZ 12.8, 13) ------------------------------------------------------------------
+
+REPORTS_TITLE = "Какой отчёт нужен?"
+BTN_REPORT_SUMMARY = "Общая сводка"
+BTN_REPORT_DEBTS = "Кто кому должен"
+BTN_REPORT_RECORDS = "Все записи за период"
+BTN_REPORT_CASH = "Движение кассы"
+BTN_REPORT_STATEMENT = "Выписка по клиенту"
+BTN_THIS_MONTH = "Этот месяц"
+BTN_LAST_MONTH = "Прошлый месяц"
+BTN_THIS_YEAR = "С начала года"
+BTN_ALL_TIME = "Всё время"
+BTN_CUSTOM_PERIOD = "Указать даты"
+BTN_EXCEL = "Excel"
+BTN_PDF = "PDF"
+
+ASK_FORMAT = "В каком виде прислать?"
+ASK_PERIOD = "За какой период?"
+ASK_PERIOD_START = "Введите дату начала периода в формате ДД.ММ.ГГГГ:"
+ASK_PERIOD_END = "Введите дату конца периода в формате ДД.ММ.ГГГГ:"
+PERIOD_END_BEFORE_START = "Конец периода не может быть раньше начала. Введите дату конца ещё раз:"
+RATES_INTRO = "Укажите курсы для пересчёта кассы в сомы."
+STATEMENT_CLIENT_QUESTION = "По какому клиенту нужна выписка?"
+STATEMENT_NO_CLIENTS = "Клиентов пока нет."
+REPORT_FAILED = "Не получилось сформировать отчёт. Попробуйте ещё раз или нажмите /menu."
+
+REPORT_TITLES = {
+    "summary": "Общая сводка",
+    "debts": "Кто кому должен",
+    "records": "Все записи за период",
+    "cash": "Движение кассы",
+    "statement": "Выписка по клиенту",
+}
+
+REPORT_FILE_PREFIXES = {
+    "summary": "Общая_сводка",
+    "debts": "Кто_кому_должен",
+    "records": "Все_записи",
+    "cash": "Движение_кассы",
+    "statement": "Выписка",
+}
+
+
+def ask_rate_for_summary(currency: Currency) -> str:
+    return f"{RATES_INTRO}\n<b>{rate_question(currency, HOME_CURRENCY)}</b>"
+
+
+def report_step(title: str, question: str) -> str:
+    return f"<b>{esc(title)}</b>\n{question}"

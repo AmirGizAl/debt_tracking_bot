@@ -455,11 +455,3 @@ async def history_page(
     session: AsyncSession,
 ) -> None:
     await _show_history(callback, state, bot, session, callback_data.client_id, callback_data.page)
-
-
-# --- not built yet -----------------------------------------------------------------------------
-
-
-@router.callback_query(_action(ClientsAction.STATEMENT))
-async def not_implemented(callback: CallbackQuery) -> None:
-    await answer(callback, texts.NOT_IMPLEMENTED)

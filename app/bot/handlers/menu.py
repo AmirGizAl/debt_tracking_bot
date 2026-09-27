@@ -45,9 +45,3 @@ async def to_home(callback: CallbackQuery, state: FSMContext, bot: Bot, user: Us
 @router.callback_query(NoopCb.filter())
 async def noop(callback: CallbackQuery) -> None:
     await answer(callback)
-
-
-@router.callback_query(MenuCb.filter())
-async def not_implemented(callback: CallbackQuery) -> None:
-    # Placeholder for sections that are not built yet; real routers are included earlier.
-    await answer(callback, texts.NOT_IMPLEMENTED)

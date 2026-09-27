@@ -23,6 +23,7 @@ from app.bot.handlers import (
     operation_card,
     operation_steps,
     repay,
+    reports,
     start,
 )
 from app.bot.handlers import settings as settings_handlers
@@ -83,6 +84,7 @@ def create_dispatcher(
         operation_steps.router,
         operation_card.router,
         cash.router,
+        reports.router,
         menu.router,
         fallback.router,
     )

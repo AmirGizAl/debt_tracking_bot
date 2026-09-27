@@ -145,3 +145,18 @@ class RevCb(CallbackData, prefix="rv"):
 class HistoryCb(CallbackData, prefix="h"):
     client_id: int
     page: int = 0
+
+
+class RepAction(StrEnum):
+    KIND = "k"
+    CLIENT = "cl"
+    SEARCH = "sr"
+    RESULTS = "rs"
+    PERIOD = "p"
+    FORMAT = "f"
+    BACK = "b"
+
+
+class RepCb(CallbackData, prefix="rp"):
+    action: RepAction
+    value: str = ""

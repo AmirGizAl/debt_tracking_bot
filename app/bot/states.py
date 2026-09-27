@@ -39,3 +39,12 @@ class AdjustmentFlow(StatesGroup):
 class ReversalFlow(StatesGroup):
     reason = State()
     confirm = State()
+
+
+class ReportFlow(StatesGroup):
+    rates = State()
+    client = State()
+    period = State()
+    period_start = State()
+    period_end = State()
+    format = State()
