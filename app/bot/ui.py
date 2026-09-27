@@ -134,3 +134,19 @@ class OnScreen(Filter):
         if callback.message is None:
             return False
         return callback.message.message_id == await screen_id(state)
+
+
+async def leave_scenario(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None:
+    """Navigation to a plain screen abandons any scenario (its old screen loses buttons)."""
+    if callback.message is None:
+        await state.clear()
+        return
+    await reset_scenario(
+        state, bot, callback.message.chat.id, keep_message_id=callback.message.message_id
+    )
+
+
+def chat_id_of(event: Message | CallbackQuery) -> int:
+    if isinstance(event, Message):
+        return event.chat.id
+    return event.message.chat.id if event.message is not None else event.from_user.id

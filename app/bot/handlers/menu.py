@@ -4,7 +4,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
 from app.bot import texts
-from app.bot.callbacks import MenuAction, MenuCb
+from app.bot.callbacks import MenuAction, MenuCb, NoopCb
 from app.bot.keyboards.common import main_menu
 from app.bot.ui import answer, drop_keyboard, edit_or_send, reset_scenario, screen_id
 from app.db.models import User
@@ -39,6 +39,11 @@ async def to_home(callback: CallbackQuery, state: FSMContext, bot: Bot, user: Us
         await drop_keyboard(bot, callback.message.chat.id, current_screen)
     await state.clear()
     await edit_or_send(bot, callback.message, texts.MAIN_MENU, main_menu(user))
+    await answer(callback)
+
+
+@router.callback_query(NoopCb.filter())
+async def noop(callback: CallbackQuery) -> None:
     await answer(callback)
 
 

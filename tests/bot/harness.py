@@ -117,7 +117,8 @@ class FakeMessage:
 
     @property
     def text(self) -> str:
-        return plain(self.html)
+        """Visible text; no-break spaces become plain ones to keep assertions readable."""
+        return plain(self.html).replace("\u00a0", " ")
 
     @property
     def buttons(self) -> list[list[str]]:
@@ -158,6 +159,9 @@ class FakeTelegram(BaseSession):
         self.callback_answers: dict[str, AnswerCallbackQuery] = {}
         self.chat_actions: list[SendChatAction] = []
         self.unreachable_chats: set[int] = set()
+        # The message a user is looking at: the newest sent one or the one whose text was
+        # just edited (removing buttons alone does not count).
+        self.last_shown: dict[int, FakeMessage] = {}
         self._message_ids: dict[int, itertools.count[int]] = defaultdict(lambda: itertools.count(1))
 
     def next_message_id(self, chat_id: int) -> int:
@@ -166,6 +170,8 @@ class FakeTelegram(BaseSession):
     def add(self, message: FakeMessage) -> FakeMessage:
         self.messages[(message.chat_id, message.message_id)] = message
         self.history[message.chat_id].append(message)
+        if message.from_bot:
+            self.last_shown[message.chat_id] = message
         return message
 
     async def close(self) -> None:
@@ -254,6 +260,7 @@ class FakeTelegram(BaseSession):
             raise TelegramBadRequest(method, "Bad Request: message is not modified")
         message.html = method.text
         message.markup = markup
+        self.last_shown[message.chat_id] = message
         return self._as_telegram(message)
 
     def _do_EditMessageReplyMarkup(self, method: EditMessageReplyMarkup) -> Message:
@@ -424,9 +431,10 @@ class UserClient:
 
     @property
     def last(self) -> FakeMessage:
-        messages = self.bot_messages
-        assert messages, "the bot has not sent anything to this chat"
-        return messages[-1]
+        """What the user looks at: the newest bot message or the one just edited."""
+        message = self.telegram.last_shown.get(self.chat_id)
+        assert message is not None, "the bot has not sent anything to this chat"
+        return message
 
     def mark(self) -> int:
         return len(self.telegram.history[self.chat_id])

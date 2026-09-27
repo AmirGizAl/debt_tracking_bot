@@ -13,7 +13,7 @@ from aiogram.types import BotCommand, BotCommandScopeDefault
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.bot import texts
-from app.bot.handlers import errors, fallback, menu, start
+from app.bot.handlers import clients, errors, fallback, menu, start
 from app.bot.handlers import settings as settings_handlers
 from app.bot.middlewares.access import AccessMiddleware
 from app.bot.middlewares.db import DbSessionMiddleware
@@ -66,6 +66,7 @@ def create_dispatcher(
         errors.router,
         start.router,
         settings_handlers.router,
+        clients.router,
         menu.router,
         fallback.router,
     )

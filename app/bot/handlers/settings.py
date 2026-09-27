@@ -10,7 +10,7 @@ from app.bot import texts
 from app.bot.callbacks import MenuAction, MenuCb, SettingsAction, SettingsCb
 from app.bot.keyboards import settings as kb
 from app.bot.states import HelperFlow
-from app.bot.ui import answer, drop_keyboard, edit_or_send, finish, reset_scenario, show_step
+from app.bot.ui import answer, drop_keyboard, edit_or_send, finish, leave_scenario, show_step
 from app.config import Settings
 from app.db.models import User
 from app.services import users
@@ -25,19 +25,12 @@ async def _owner_only(callback: CallbackQuery, user: User) -> bool:
     return False
 
 
-async def _leave_scenario(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None:
-    assert callback.message is not None
-    await reset_scenario(
-        state, bot, callback.message.chat.id, keep_message_id=callback.message.message_id
-    )
-
-
 @router.callback_query(MenuCb.filter(F.action == MenuAction.SETTINGS))
 @router.callback_query(SettingsCb.filter(F.action == SettingsAction.HOME))
 async def open_settings(callback: CallbackQuery, state: FSMContext, bot: Bot, user: User) -> None:
     if not await _owner_only(callback, user):
         return
-    await _leave_scenario(callback, state, bot)
+    await leave_scenario(callback, state, bot)
     await edit_or_send(bot, callback.message, texts.SETTINGS_TITLE, kb.settings_menu())
     await answer(callback)
 
@@ -48,7 +41,7 @@ async def show_helpers(
 ) -> None:
     if not await _owner_only(callback, user):
         return
-    await _leave_scenario(callback, state, bot)
+    await leave_scenario(callback, state, bot)
     helpers = await users.list_helpers(session, user)
     text = texts.HELPERS_TITLE if helpers else f"{texts.HELPERS_TITLE}\n{texts.HELPERS_EMPTY}"
     await edit_or_send(bot, callback.message, text, kb.helpers_list(helpers))
@@ -59,7 +52,7 @@ async def show_helpers(
 async def ask_username(callback: CallbackQuery, state: FSMContext, bot: Bot, user: User) -> None:
     if not await _owner_only(callback, user):
         return
-    await _leave_scenario(callback, state, bot)
+    await leave_scenario(callback, state, bot)
     await state.set_state(HelperFlow.username)
     await show_step(callback, state, bot, texts.ASK_HELPER_USERNAME, kb.ask_username())
     await answer(callback)
@@ -99,7 +92,7 @@ async def open_helper(
     except users.UserNotFound:
         await answer(callback, texts.STALE_ACTION)
         return
-    await _leave_scenario(callback, state, bot)
+    await leave_scenario(callback, state, bot)
     added_on = helper.created_at.astimezone(settings.zone).date()
     await edit_or_send(
         bot, callback.message, texts.helper_card(helper, added_on), kb.helper_card(helper)
@@ -123,7 +116,7 @@ async def ask_delete_confirmation(
     except users.UserNotFound:
         await answer(callback, texts.STALE_ACTION)
         return
-    await _leave_scenario(callback, state, bot)
+    await leave_scenario(callback, state, bot)
     await edit_or_send(
         bot, callback.message, texts.confirm_delete_helper(helper), kb.confirm_delete(helper)
     )

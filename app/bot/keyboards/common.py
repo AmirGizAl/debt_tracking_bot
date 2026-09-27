@@ -1,9 +1,13 @@
+from collections.abc import Callable
+from typing import Any
+
 from aiogram.filters.callback_data import CallbackData
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from app.bot import texts
-from app.bot.callbacks import MenuAction, MenuCb
+from app.bot.callbacks import MenuAction, MenuCb, NoopCb
 from app.db.models import User
+from app.services.pagination import Page
 
 
 def button(text: str, callback: CallbackData) -> InlineKeyboardButton:
@@ -34,3 +38,16 @@ def main_menu(user: User) -> InlineKeyboardMarkup:
         [item(texts.BTN_CLIENTS, MenuAction.CLIENTS), item(texts.BTN_CASH, MenuAction.CASH)],
         last_row,
     )
+
+
+def pager(page: Page[Any], make: Callable[[int], CallbackData]) -> list[InlineKeyboardButton]:
+    """'‹ 2/5 ›' row; empty when everything fits on one page."""
+    if page.pages <= 1:
+        return []
+    row = []
+    if page.has_prev:
+        row.append(button(texts.BTN_PREV_PAGE, make(page.page - 1)))
+    row.append(button(f"{page.page + 1}/{page.pages}", NoopCb()))
+    if page.has_next:
+        row.append(button(texts.BTN_NEXT_PAGE, make(page.page + 1)))
+    return row

@@ -37,3 +37,27 @@ class SettingsAction(StrEnum):
 class SettingsCb(CallbackData, prefix="s"):
     action: SettingsAction
     helper_id: int = 0
+
+
+class ClientsAction(StrEnum):
+    LIST = "ls"
+    OPEN = "op"
+    SEARCH = "sr"
+    RESULTS = "rs"
+    ADD = "ad"
+    SKIP_COMMENT = "sk"
+    BACK_TO_NAME = "bn"
+    EDIT = "ed"
+    EDIT_NAME = "en"
+    EDIT_COMMENT = "ec"
+    CLEAR_COMMENT = "cc"
+    DELETE = "dl"
+    CONFIRM_DELETE = "dk"
+    HISTORY = "hs"
+    STATEMENT = "st"
+
+
+class ClientsCb(CallbackData, prefix="c"):
+    action: ClientsAction
+    client_id: int = 0
+    page: int = 0
