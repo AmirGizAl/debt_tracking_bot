@@ -23,6 +23,7 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen.canvas import Canvas
 from reportlab.platypus import Flowable, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
+from app.bot import texts
 from app.domain.dates import format_date
 from app.domain.money import format_amount, format_money, format_rate, format_signed
 from app.services.reports.data import (
@@ -40,19 +41,6 @@ FONT, FONT_BOLD = "DejaVuSans", "DejaVuSans-Bold"
 MARGIN = 15 * mm
 GREY_TEXT = colors.HexColor("#8C8C8C")
 HEADER_BACKGROUND = colors.HexColor("#DDEBF7")
-RECORD_COLUMNS = [
-    "№",
-    "Дата",
-    "Операция",
-    "Клиент",
-    "Сумма долга",
-    "Оплата",
-    "Курс",
-    "Комментарий",
-    "Автор",
-    "Внесено",
-    "Статус",
-]
 
 
 @cache
@@ -81,7 +69,7 @@ class _NumberedCanvas(Canvas):
             self.__dict__.update(page)
             self.setFont(FONT, 8)
             self.drawRightString(
-                self._pagesize[0] - MARGIN, 8 * mm, f"Страница {self._pageNumber} из {total}"
+                self._pagesize[0] - MARGIN, 8 * mm, texts.report_page(self._pageNumber, total)
             )
             super().showPage()
         super().save()
@@ -92,12 +80,26 @@ class _Styles:
         _register_fonts()  # Paragraphs resolve fonts as soon as they are created
         self.title = ParagraphStyle("title", fontName=FONT_BOLD, fontSize=14, leading=18)
         self.meta = ParagraphStyle("meta", fontName=FONT, fontSize=9, leading=12)
+        # keepWithNext: a heading never stays alone at the bottom of a page.
         self.heading = ParagraphStyle(
-            "heading", fontName=FONT_BOLD, fontSize=11, leading=14, spaceBefore=8, spaceAfter=4
+            "heading",
+            fontName=FONT_BOLD,
+            fontSize=11,
+            leading=14,
+            spaceBefore=8,
+            spaceAfter=4,
+            keepWithNext=1,
         )
         self.text = ParagraphStyle("text", fontName=FONT, fontSize=9, leading=12)
+        self.lead = ParagraphStyle("lead", parent=self.text, keepWithNext=1)
         self.subheading = ParagraphStyle(
-            "subheading", fontName=FONT_BOLD, fontSize=9.5, leading=12, spaceBefore=4, spaceAfter=2
+            "subheading",
+            fontName=FONT_BOLD,
+            fontSize=9.5,
+            leading=12,
+            spaceBefore=4,
+            spaceAfter=2,
+            keepWithNext=1,
         )
         self.cell = ParagraphStyle("cell", fontName=FONT, fontSize=size, leading=size * 1.25)
         self.number = ParagraphStyle("number", parent=self.cell, alignment=TA_RIGHT)
@@ -158,9 +160,9 @@ def _table(
 def _header(styles: _Styles, meta: ReportMeta, extra: Sequence[str] = ()) -> list[Flowable]:
     lines = [_paragraph(meta.title, styles.title)]
     if meta.period is not None:
-        lines.append(_paragraph(f"Период: {meta.period.label}", styles.meta))
-    lines.append(_paragraph(f"Сформирован: {meta.generated_at:%d.%m.%Y %H:%M}", styles.meta))
-    lines.append(_paragraph(f"Сформировал: {meta.generated_by}", styles.meta))
+        lines.append(_paragraph(texts.report_period_line(meta.period.label), styles.meta))
+    lines.append(_paragraph(texts.report_generated_line(meta.generated_at), styles.meta))
+    lines.append(_paragraph(texts.report_author_line(meta.generated_by), styles.meta))
     lines.extend(_paragraph(line, styles.meta) for line in extra)
     lines.append(Spacer(1, 4 * mm))
     return lines
@@ -193,11 +195,11 @@ def _amount(value: Decimal | None) -> str:
 def summary_pdf(report: SummaryReport) -> bytes:
     styles = _Styles(9)
     story = _header(styles, report.meta)
-    story.append(_paragraph("Касса и долги по валютам", styles.heading))
+    story.append(_paragraph(texts.SUMMARY_TITLE_BY_CURRENCY, styles.heading))
     story.append(
         _table(
             styles,
-            ["Валюта", "В кассе", "Вам должны", "Вы должны", "Разница"],
+            texts.SUMMARY_COLUMNS,
             [
                 (
                     [
@@ -215,7 +217,7 @@ def summary_pdf(report: SummaryReport) -> bytes:
             numeric={1, 2, 3, 4},
         )
     )
-    story.append(_paragraph("Касса в пересчёте на сомы", styles.heading))
+    story.append(_paragraph(texts.SUMMARY_TITLE_IN_KGS, styles.heading))
     rows: list[tuple[Sequence[object], bool]] = [
         (
             [row.currency, format_amount(row.cash), format_rate(row.rate), format_amount(row.kgs)],
@@ -223,11 +225,11 @@ def summary_pdf(report: SummaryReport) -> bytes:
         )
         for row in report.kgs_rows
     ]
-    rows.append((["Итого", "", "", format_amount(report.kgs_total)], False))
+    rows.append(([texts.REPORT_TOTAL, "", "", format_amount(report.kgs_total)], False))
     story.append(
         _table(
             styles,
-            ["Валюта", "Остаток в кассе", "Курс, сомов за 1", "В сомах"],
+            texts.SUMMARY_KGS_COLUMNS,
             rows,
             [24, 45, 40, 45],
             numeric={1, 2, 3},
@@ -240,21 +242,24 @@ def summary_pdf(report: SummaryReport) -> bytes:
 def debts_pdf(report: DebtsReport) -> bytes:
     styles = _Styles(9)
     story = _header(styles, report.meta)
-    for title, sections in (("Вам должны", report.owed_to_you), ("Вы должны", report.you_owe)):
+    for title, sections in (
+        (texts.REPORT_OWED_TO_YOU, report.owed_to_you),
+        (texts.REPORT_YOU_OWE, report.you_owe),
+    ):
         story.append(_paragraph(title, styles.heading))
         if not sections:
-            story.append(_paragraph("Долгов нет", styles.text))
+            story.append(_paragraph(texts.REPORT_NO_DEBTS, styles.text))
             continue
         for section in sections:
             rows: list[tuple[Sequence[object], bool]] = [
                 ([line.client, format_amount(line.amount)], False) for line in section.lines
             ]
-            rows.append((["Итого по валюте", format_amount(section.total)], False))
+            rows.append(([texts.REPORT_TOTAL_BY_CURRENCY, format_amount(section.total)], False))
             story.append(_paragraph(str(section.currency), styles.subheading))
             story.append(
                 _table(
                     styles,
-                    ["Клиент", f"Сумма, {section.currency}"],
+                    texts.debts_pdf_columns(section.currency),
                     rows,
                     [110, 50],
                     numeric={1},
@@ -269,7 +274,7 @@ def records_pdf(report: RecordsReport) -> bytes:
     styles = _Styles(7.5)
     story = _header(styles, report.meta)
     if not report.rows:
-        story.append(_paragraph("Записей за период нет", styles.text))
+        story.append(_paragraph(texts.REPORT_NO_RECORDS_IN_PERIOD, styles.text))
         return _build(story, report.meta, wide=True)
     rows = [
         (
@@ -295,7 +300,7 @@ def records_pdf(report: RecordsReport) -> bytes:
     story.append(
         _table(
             styles,
-            RECORD_COLUMNS,
+            texts.RECORDS_PDF_COLUMNS,
             rows,
             [9, 20, 21, 25, 24, 23, 24, 34, 24, 25, 38],
             numeric={0, 4, 5},
@@ -308,18 +313,23 @@ def cash_pdf(report: CashReport) -> bytes:
     styles = _Styles(8)
     story = _header(styles, report.meta)
     if not report.sections:
-        story.append(_paragraph("Движений нет", styles.text))
+        story.append(_paragraph(texts.REPORT_NO_MOVEMENTS, styles.text))
     for section in report.sections:
         currency = section.currency
         story.append(_paragraph(str(currency), styles.heading))
         story.append(
-            _paragraph(f"Остаток на начало: {format_money(section.opening, currency)}", styles.text)
+            _paragraph(
+                texts.report_money_line(
+                    texts.REPORT_OPENING, format_money(section.opening, currency)
+                ),
+                styles.lead if section.rows else styles.text,
+            )
         )
         if section.rows:
             story.append(
                 _table(
                     styles,
-                    ["Дата", "№", "Описание", "Приход", "Расход", "Остаток"],
+                    texts.CASH_REPORT_COLUMNS,
                     [
                         (
                             [
@@ -339,7 +349,12 @@ def cash_pdf(report: CashReport) -> bytes:
                 )
             )
         story.append(
-            _paragraph(f"Остаток на конец: {format_money(section.closing, currency)}", styles.text)
+            _paragraph(
+                texts.report_money_line(
+                    texts.REPORT_CLOSING, format_money(section.closing, currency)
+                ),
+                styles.text,
+            )
         )
         story.append(Spacer(1, 4 * mm))
     return _build(story, report.meta, wide=True)
@@ -347,22 +362,25 @@ def cash_pdf(report: CashReport) -> bytes:
 
 def statement_pdf(report: StatementReport) -> bytes:
     styles = _Styles(8)
-    story = _header(styles, report.meta, [f"Клиент: {report.client}"])
+    story = _header(styles, report.meta, [texts.report_client_line(report.client)])
     if not report.sections:
-        story.append(_paragraph("Записей нет", styles.text))
+        story.append(_paragraph(texts.REPORT_NO_RECORDS, styles.text))
     for section in report.sections:
         currency = section.currency
         story.append(_paragraph(str(currency), styles.heading))
         story.append(
             _paragraph(
-                f"Остаток на начало: {balance_phrase(section.opening, currency)}", styles.text
+                texts.report_money_line(
+                    texts.REPORT_OPENING, balance_phrase(section.opening, currency)
+                ),
+                styles.lead if section.rows else styles.text,
             )
         )
         if section.rows:
             story.append(
                 _table(
                     styles,
-                    ["Дата", "№", "Операция", "Изменение долга", "Оплата", "Баланс после"],
+                    texts.STATEMENT_COLUMNS,
                     [
                         (
                             [
@@ -383,7 +401,10 @@ def statement_pdf(report: StatementReport) -> bytes:
             )
         story.append(
             _paragraph(
-                f"Остаток на конец: {balance_phrase(section.closing, currency)}", styles.text
+                texts.report_money_line(
+                    texts.REPORT_CLOSING, balance_phrase(section.closing, currency)
+                ),
+                styles.text,
             )
         )
         story.append(Spacer(1, 4 * mm))

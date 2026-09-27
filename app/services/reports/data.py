@@ -33,7 +33,7 @@ class Period:
     @property
     def label(self) -> str:
         if self.start is None and self.end is None:
-            return "всё время"
+            return texts.REPORT_ALL_TIME
         start = format_date(self.start) if self.start else "…"
         end = format_date(self.end) if self.end else "…"
         return f"{start} – {end}"
@@ -41,9 +41,9 @@ class Period:
     @property
     def file_part(self) -> str:
         if self.start is None and self.end is None:
-            return "всё_время"
-        start = self.start.isoformat() if self.start else "начало"
-        end = self.end.isoformat() if self.end else "сегодня"
+            return texts.REPORT_FILE_ALL_TIME
+        start = self.start.isoformat() if self.start else texts.REPORT_FILE_OPEN_START
+        end = self.end.isoformat() if self.end else texts.REPORT_FILE_OPEN_END
         return f"{start}_{end}"
 
     def contains(self, day: date) -> bool:
@@ -214,9 +214,9 @@ class RecordsReport:
 
 def _status(operation: Operation, reversed_by: int | None) -> str:
     if operation.reversal_of_id is not None:
-        return f"отмена записи №{operation.reversal_of_id} ({operation.reversal_reason})"
+        return texts.status_reversal_of(operation.reversal_of_id, operation.reversal_reason)
     if reversed_by is not None:
-        return f"отменена записью №{reversed_by}"
+        return texts.status_cancelled_by(reversed_by)
     return ""
 
 
@@ -314,12 +314,12 @@ class _Move:
 
 def _operation_label(operation: Operation) -> str:
     if operation.reversal_of_id is not None:
-        return f"Отмена записи №{operation.reversal_of_id}"
+        return texts.reversal_label(operation.reversal_of_id)
     return texts.TYPE_LABEL[operation.type]
 
 
 def _record_description(operation: Operation) -> str:
-    return f"{_operation_label(operation)} — {operation.client.name}"
+    return texts.movement_description(_operation_label(operation), operation.client.name)
 
 
 async def cash_data(session: AsyncSession, meta: ReportMeta, period: Period) -> CashReport:
@@ -360,8 +360,8 @@ async def cash_data(session: AsyncSession, meta: ReportMeta, period: Period) -> 
             _Move(
                 day=adjustment.adj_date,
                 created_at=adjustment.created_at,
-                number="корр.",
-                description=f"Корректировка — {adjustment.reason}",
+                number=texts.REPORT_ADJUSTMENT_NUMBER,
+                description=texts.movement_description(texts.ADJUSTMENT_LABEL, adjustment.reason),
                 amount=adjustment.amount,
                 grey=False,
             )
@@ -423,13 +423,7 @@ class StatementReport:
     sections: list[StatementSection]
 
 
-def balance_phrase(balance: Decimal, currency: Currency) -> str:
-    """ "должен вам 600 USD" / "вы должны 3 000 RUB" / "долга нет"."""
-    if balance == 0:
-        return "долга нет"
-    if balance > 0:
-        return f"должен вам {format_money(balance, currency)}"
-    return f"вы должны {format_money(-balance, currency)}"
+balance_phrase = texts.balance_phrase
 
 
 async def statement_data(
@@ -452,9 +446,9 @@ async def statement_data(
         if operation.cash_currency != currency:
             assert operation.rate is not None
             assert operation.rate_base is not None and operation.rate_quote is not None
-            payment = (
-                f"{format_money(operation.cash_amount, operation.cash_currency)}, курс "
-                f"{texts.rate_text(operation.rate, operation.rate_base, operation.rate_quote)}"
+            payment = texts.statement_payment(
+                format_money(operation.cash_amount, operation.cash_currency),
+                texts.rate_text(operation.rate, operation.rate_base, operation.rate_quote),
             )
         rows[currency].append(
             StatementRow(

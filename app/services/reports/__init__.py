@@ -56,7 +56,7 @@ class ReportFile:
 
 def _safe(text: str) -> str:
     """ "Иван (Ош)" -> "Иван_(Ош)"; no path separators or other odd characters."""
-    return _UNSAFE_IN_FILE_NAME.sub("_", text).strip("_")[:60] or "клиент"
+    return _UNSAFE_IN_FILE_NAME.sub("_", text).strip("_")[:60] or texts.REPORT_FILE_CLIENT_FALLBACK
 
 
 def file_name(

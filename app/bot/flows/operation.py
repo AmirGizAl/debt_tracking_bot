@@ -217,7 +217,7 @@ async def show_pay_mode(event: Event, state: FSMContext, bot: Bot, flow: Flow) -
 async def show_pay_currency(event: Event, state: FSMContext, bot: Bot, flow: Flow) -> None:
     assert flow.debt_currency is not None
     await state.set_state(OperationFlow.pay_currency)
-    text = f"{header(flow)}\nДолг в {flow.debt_currency}.\n\n{texts.ASK_PAY_CURRENCY}"
+    text = f"{header(flow)}\n{texts.debt_in(flow.debt_currency)}\n\n{texts.ASK_PAY_CURRENCY}"
     await show_step(event, state, bot, text, kb.pay_currencies(flow.debt_currency))
 
 
@@ -245,7 +245,7 @@ async def show_rate(
     assert flow.amount is not None and flow.debt_currency is not None
     base, quote = flow.rate_pair
     paid = format_money(flow.amount, flow.cash_currency)
-    parts = [f"{header(flow)}\nОплата: {paid}, долг в {flow.debt_currency}."]
+    parts = [f"{header(flow)}\n{texts.payment_context(paid, flow.debt_currency)}"]
     if problem:
         parts.append(problem)
     parts.append(f"<b>{texts.rate_question(base, quote)}</b>")

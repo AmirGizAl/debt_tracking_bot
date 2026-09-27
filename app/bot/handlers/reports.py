@@ -99,7 +99,7 @@ async def _show_period(event: Event, state: FSMContext, bot: Bot) -> None:
     data = await state.get_data()
     question = texts.ASK_PERIOD
     if data.get("client_name"):
-        question = f"Клиент: {texts.esc(data['client_name'])}\n{question}"
+        question = f"{texts.report_client_line(texts.esc(data['client_name']))}\n{question}"
     await state.set_state(ReportFlow.period)
     await show_step(event, state, bot, texts.report_step(_title(data), question), kb.periods())
 

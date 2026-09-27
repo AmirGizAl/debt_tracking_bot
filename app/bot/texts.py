@@ -4,7 +4,7 @@ Plain constants are ready-to-send strings; functions build texts with values.
 Anything that comes from users (names, comments, reasons) must go through `esc()`.
 """
 
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from html import escape
 from zoneinfo import ZoneInfo
@@ -803,3 +803,147 @@ def ask_rate_for_summary(currency: Currency) -> str:
 
 def report_step(title: str, question: str) -> str:
     return f"<b>{esc(title)}</b>\n{question}"
+
+
+# --- Report files (TZ 13) -------------------------------------------------------------------
+
+REPORT_ALL_TIME = "всё время"
+REPORT_FILE_ALL_TIME = "всё_время"
+REPORT_FILE_OPEN_START = "начало"
+REPORT_FILE_OPEN_END = "сегодня"
+REPORT_FILE_CLIENT_FALLBACK = "клиент"
+
+REPORT_TOTAL = "Итого"
+REPORT_TOTAL_BY_CURRENCY = "Итого по валюте"
+REPORT_OWED_TO_YOU = "Вам должны"
+REPORT_YOU_OWE = "Вы должны"
+REPORT_NO_DEBTS = "Долгов нет"
+REPORT_NO_RECORDS = "Записей нет"
+REPORT_NO_RECORDS_IN_PERIOD = "Записей за период нет"
+REPORT_NO_MOVEMENTS = "Движений нет"
+REPORT_OPENING = "Остаток на начало"
+REPORT_CLOSING = "Остаток на конец"
+REPORT_ADJUSTMENT_NUMBER = "корр."
+REPORT_NO_DEBT_PHRASE = "долга нет"
+
+SUMMARY_SHEET_BY_CURRENCY = "Касса и долги"
+SUMMARY_SHEET_IN_KGS = "Касса в сомах"
+SUMMARY_TITLE_BY_CURRENCY = "Касса и долги по валютам"
+SUMMARY_TITLE_IN_KGS = "Касса в пересчёте на сомы"
+SUMMARY_COLUMNS = ("Валюта", "В кассе", "Вам должны", "Вы должны", "Разница")
+SUMMARY_KGS_COLUMNS = ("Валюта", "Остаток в кассе", "Курс, сомов за 1", "В сомах")
+
+DEBTS_COLUMNS = ("Валюта", "Клиент", "Сумма")
+
+RECORDS_SHEET = "Записи"
+RECORDS_PDF_COLUMNS = (
+    "№",
+    "Дата",
+    "Операция",
+    "Клиент",
+    "Сумма долга",
+    "Оплата",
+    "Курс",
+    "Комментарий",
+    "Автор",
+    "Внесено",
+    "Статус",
+)
+RECORDS_XLSX_COLUMNS = (
+    "№",
+    "Дата",
+    "Операция",
+    "Клиент",
+    "Сумма долга",
+    "Валюта долга",
+    "Оплата",
+    "Валюта оплаты",
+    "Курс",
+    "Комментарий",
+    "Автор",
+    "Внесено",
+    "Статус",
+)
+
+CASH_REPORT_SHEET = "Движение кассы"
+CASH_REPORT_COLUMNS = ("Дата", "№", "Описание", "Приход", "Расход", "Остаток")
+
+STATEMENT_SHEET = "Выписка"
+STATEMENT_COLUMNS = ("Дата", "№", "Операция", "Изменение долга", "Оплата", "Баланс после")
+
+
+def report_period_line(label: str) -> str:
+    return f"Период: {label}"
+
+
+def report_generated_line(moment: datetime) -> str:
+    return f"Сформирован: {moment:%d.%m.%Y %H:%M}"
+
+
+def report_author_line(name: str) -> str:
+    return f"Сформировал: {name}"
+
+
+def report_client_line(name: str) -> str:
+    return f"Клиент: {name}"
+
+
+def report_currency_line(currency: Currency) -> str:
+    return f"Валюта: {currency}"
+
+
+def report_page(number: int, total: int) -> str:
+    return f"Страница {number} из {total}"
+
+
+def debts_pdf_columns(currency: Currency) -> tuple[str, str]:
+    return "Клиент", f"Сумма, {currency}"
+
+
+def report_money_line(label: str, amount: str) -> str:
+    """ "Остаток на начало: 9 000 USD"."""
+    return f"{label}: {amount}"
+
+
+def reversal_label(original_number: int) -> str:
+    return f"Отмена записи №{original_number}"
+
+
+def status_cancelled_by(reversal_number: int) -> str:
+    return f"отменена записью №{reversal_number}"
+
+
+def status_reversal_of(original_number: int, reason: str | None) -> str:
+    return f"отмена записи №{original_number} ({reason})"
+
+
+def movement_description(label: str, detail: str) -> str:
+    """ "Выдал в долг — Азамат" / "Корректировка — Личные расходы"."""
+    return f"{label} — {detail}"
+
+
+ADJUSTMENT_LABEL = "Корректировка"
+
+
+def statement_payment(paid: str, rate: str) -> str:
+    return f"{paid}, курс {rate}"
+
+
+def balance_phrase(balance: Decimal, currency: Currency) -> str:
+    """ "должен вам 600 USD" / "вы должны 3 000 RUB" / "долга нет"."""
+    if balance == 0:
+        return REPORT_NO_DEBT_PHRASE
+    if balance > 0:
+        return f"должен вам {format_money(balance, currency)}"
+    return f"вы должны {format_money(-balance, currency)}"
+
+
+# --- Record scenario details ------------------------------------------------------------------
+
+
+def debt_in(currency: Currency) -> str:
+    return f"Долг в {currency}."
+
+
+def payment_context(paid: str, debt_currency: Currency) -> str:
+    return f"Оплата: {paid}, долг в {debt_currency}."
