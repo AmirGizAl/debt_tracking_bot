@@ -1,0 +1,61 @@
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: debtbot
+      POSTGRES_PASSWORD: debtbot
+      POSTGRES_DB: debtbot
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U debtbot -d debtbot"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    logging: *default-logging
+
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    logging: *default-logging
+
+  bot:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    logging: *default-logging
+
+  # Optional SOCKS5 proxy to Telegram through a Hysteria2 server:
+  #   docker compose --profile proxy up -d --build   (+ PROXY_URL=socks5://hysteria:1080)
+  hysteria:
+    image: tobyxdd/hysteria:latest
+    profiles: ["proxy"]
+    restart: unless-stopped
+    command: ["client", "-c", "/etc/hysteria/config.yaml"]
+    volumes:
+      - ./hysteria/config.yaml:/etc/hysteria/config.yaml:ro
+    logging: *default-logging
+
+volumes:
+  pgdata:
+  redisdata:

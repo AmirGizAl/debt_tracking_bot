@@ -1,0 +1,57 @@
+from collections.abc import AsyncIterator
+
+import pytest
+from aiogram import Bot, Dispatcher
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
+
+from app.bot.dispatcher import create_dispatcher
+from app.config import Settings
+from app.db.session import create_sessionmaker
+from app.services import users
+from tests.bot.harness import BOT_TOKEN, FakeTelegram, Harness, JsonMemoryStorage, UserClient
+from tests.conftest import OWNER_TG_ID
+
+
+@pytest.fixture(scope="session")
+def settings(database_url: str) -> Settings:
+    return Settings(
+        _env_file=None,
+        bot_token=BOT_TOKEN,
+        owner_telegram_id=OWNER_TG_ID,
+        database_url=database_url,
+        redis_url=None,
+        tz="Asia/Bishkek",
+    )
+
+
+@pytest.fixture(scope="session")
+def dispatcher(migrated_engine: AsyncEngine, settings: Settings) -> Dispatcher:
+    # aiogram routers attach to one dispatcher only, so the whole session shares it;
+    # every test gets its own FSM storage and fake Telegram below.
+    return create_dispatcher(settings, create_sessionmaker(migrated_engine))
+
+
+@pytest.fixture
+async def harness(
+    dispatcher: Dispatcher,
+    sessionmaker: async_sessionmaker[AsyncSession],
+    settings: Settings,
+) -> AsyncIterator[Harness]:
+    async with sessionmaker() as session:
+        await users.ensure_owner(session, settings.owner_telegram_id)
+    dispatcher.fsm.storage = JsonMemoryStorage()
+    telegram = FakeTelegram()
+    bot = Bot(
+        token=BOT_TOKEN,
+        session=telegram,
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+    )
+    yield Harness(dispatcher, bot, telegram)
+    await dispatcher.fsm.storage.close()
+
+
+@pytest.fixture
+def owner_client(harness: Harness) -> UserClient:
+    return harness.user(OWNER_TG_ID, username="boss", first_name="Владелец")

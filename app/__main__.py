@@ -1,0 +1,54 @@
+import asyncio
+import logging
+
+from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.ext.asyncio import AsyncEngine
+
+from app.bot.dispatcher import create_bot, create_dispatcher, create_storage, prepare_bot
+from app.config import Settings
+from app.db.session import create_engine, create_sessionmaker
+from app.logging import setup_logging
+from app.services import users
+
+logger = logging.getLogger("app")
+
+
+async def wait_for_database(engine: AsyncEngine, attempts: int = 30, delay: float = 2.0) -> None:
+    for attempt in range(1, attempts + 1):
+        try:
+            async with engine.connect() as connection:
+                await connection.execute(text("SELECT 1"))
+            return
+        except (OperationalError, OSError) as exc:
+            if attempt == attempts:
+                raise
+            logger.warning("Database is not ready (%s/%s): %s", attempt, attempts, exc)
+            await asyncio.sleep(delay)
+
+
+async def run() -> None:
+    settings = Settings()
+    setup_logging(settings.log_level, settings.zone)
+    engine = create_engine(settings.database_url)
+    sessionmaker = create_sessionmaker(engine)
+    try:
+        await wait_for_database(engine)
+        async with sessionmaker() as session:
+            await users.ensure_owner(session, settings.owner_telegram_id)
+
+        bot = create_bot(settings)
+        dispatcher = create_dispatcher(settings, sessionmaker, create_storage(settings))
+        await prepare_bot(bot)
+        logger.info("Bot started, owner telegram_id=%s", settings.owner_telegram_id)
+        await dispatcher.start_polling(bot, allowed_updates=dispatcher.resolve_used_update_types())
+    finally:
+        await engine.dispose()
+
+
+def main() -> None:
+    asyncio.run(run())
+
+
+if __name__ == "__main__":
+    main()
