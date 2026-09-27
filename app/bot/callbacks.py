@@ -23,3 +23,17 @@ class MenuCb(CallbackData, prefix="m"):
 
 class NoopCb(CallbackData, prefix="noop"):
     """Buttons that only display information (e.g. a page counter)."""
+
+
+class SettingsAction(StrEnum):
+    HOME = "home"
+    HELPERS = "list"
+    ADD = "add"
+    OPEN = "open"
+    DELETE = "del"
+    CONFIRM_DELETE = "delok"
+
+
+class SettingsCb(CallbackData, prefix="s"):
+    action: SettingsAction
+    helper_id: int = 0

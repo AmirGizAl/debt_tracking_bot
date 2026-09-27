@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.bot import texts
 from app.bot.handlers import errors, fallback, menu, start
+from app.bot.handlers import settings as settings_handlers
 from app.bot.middlewares.access import AccessMiddleware
 from app.bot.middlewares.db import DbSessionMiddleware
 from app.config import Settings
@@ -64,6 +65,7 @@ def create_dispatcher(
     dispatcher.include_routers(
         errors.router,
         start.router,
+        settings_handlers.router,
         menu.router,
         fallback.router,
     )
