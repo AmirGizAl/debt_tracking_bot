@@ -7,12 +7,13 @@ Anything that comes from users (names, comments, reasons) must go through `esc()
 from datetime import date
 from decimal import Decimal
 from html import escape
+from zoneinfo import ZoneInfo
 
-from app.db.models import Client, User, UserStatus
+from app.db.models import CashAdjustment, Client, Operation, User, UserStatus
 from app.domain.currency import HOME_CURRENCY, Currency
-from app.domain.dates import format_date
+from app.domain.dates import format_date, format_datetime, format_short_date
 from app.domain.errors import ConversionProblem, InsufficientCash, NumberProblem
-from app.domain.money import format_amount, format_money, format_rate
+from app.domain.money import format_amount, format_money, format_rate, format_signed
 from app.domain.operations import OperationType, RepayWarning, WarningKind
 
 
@@ -431,6 +432,15 @@ def insufficient_cash(error: InsufficientCash) -> str:
     )
 
 
+def insufficient_cash_plain(error: InsufficientCash) -> str:
+    """For popups, which show text without HTML."""
+    return (
+        "Недостаточно денег в кассе.\n"
+        f"В кассе: {format_money(error.available, error.currency)}\n"
+        f"Нужно: {format_money(error.required, error.currency)}"
+    )
+
+
 def insufficient_cash_retry(error: InsufficientCash) -> str:
     return f"{insufficient_cash(error)}\nВведите другую сумму:"
 
@@ -522,3 +532,225 @@ def confirm_record(
 
 def record_saved(number: int) -> str:
     return f"Запись №{number} сохранена."
+
+
+# --- Cash (TZ 12.7) -------------------------------------------------------------------------
+
+CASH_TITLE = "<b>Касса</b>"
+BTN_MOVEMENTS = "Движение денег"
+BTN_ADJUST = "Корректировка"
+BTN_CASH_BACK = "‹ Касса"
+MOVEMENTS_TITLE = "<b>Движение денег</b>"
+MOVEMENTS_EMPTY = "Записей пока нет."
+BTN_ADD_MONEY = "Добавить"
+BTN_REMOVE_MONEY = "Убрать"
+ASK_ADJUST_CURRENCY = "<b>Корректировка кассы</b>\nВыберите валюту:"
+ASK_ADJUST_REASON = "Напишите причину, например «Остаток на начало работы» или «Личные расходы»:"
+REASON_EMPTY = "Причина обязательна. Напишите её:"
+ADJUSTMENT_SAVED = "Корректировка сохранена."
+BUTTON_TEXT_MAX = 40
+
+
+def _short(text: str, limit: int = BUTTON_TEXT_MAX) -> str:
+    text = " ".join(text.split())
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def cash_screen(balances: dict[Currency, Decimal]) -> str:
+    lines = [CASH_TITLE]
+    lines.extend(f"{currency}: {format_amount(value)}" for currency, value in balances.items())
+    return "\n".join(lines)
+
+
+def cash_line(currency: Currency, value: Decimal) -> str:
+    """ "В кассе USD: 9 000"."""
+    return f"В кассе {currency}: {format_amount(value)}"
+
+
+def record_label(op_type: OperationType, reversal_of_id: int | None) -> str:
+    return f"Отмена №{reversal_of_id}" if reversal_of_id is not None else TYPE_LABEL[op_type]
+
+
+def movement_button(
+    *,
+    is_adjustment: bool,
+    item_id: int,
+    day: date,
+    currency: Currency,
+    amount: Decimal,
+    op_type: OperationType | None,
+    title: str,
+    reversal_of_id: int | None,
+    reversed_by_id: int | None,
+) -> str:
+    """ "№15 · 25.09 · Мне вернули · Тимур · +1 000 USD" / "Корр. · 27.09 · −500 USD · Причина"."""
+    money = f"{format_signed(amount)} {currency}"
+    if is_adjustment:
+        return f"Корр. · {format_short_date(day)} · {money} · {_short(title, 24)}"
+    assert op_type is not None
+    text = (
+        f"№{item_id} · {format_short_date(day)} · {record_label(op_type, reversal_of_id)}"
+        f" · {_short(title, 20)} · {money}"
+    )
+    return f"{text} · отменена" if reversed_by_id is not None else text
+
+
+def adjustment_popup(adjustment: CashAdjustment, zone: ZoneInfo) -> str:
+    """Alert text (Telegram allows up to 200 characters)."""
+    text = (
+        f"Корректировка · {format_date(adjustment.adj_date)}\n"
+        f"{format_signed(adjustment.amount)} {adjustment.currency}\n"
+        f"Причина: {_short(adjustment.reason, 80)}\n"
+        f"Внёс: {_short(user_name(adjustment.author), 30)} · "
+        f"{format_datetime(adjustment.created_at, zone)}"
+    )
+    return text[:200]
+
+
+def ask_adjust_direction(currency: Currency, available: Decimal) -> str:
+    return (
+        f"<b>Корректировка кассы {currency}</b>\nСейчас в кассе: "
+        f"{format_money(available, currency)}\n\nДобавить деньги или убрать?"
+    )
+
+
+def ask_adjust_amount(currency: Currency, adding: bool) -> str:
+    action = "добавить" if adding else "убрать"
+    return f"<b>Корректировка кассы {currency}</b>\nСколько {action}? Введите сумму в {currency}:"
+
+
+def adjust_amount_problem(currency: Currency, problem: str) -> str:
+    return f"<b>Корректировка кассы {currency}</b>\n\n{problem}"
+
+
+def confirm_adjustment(
+    currency: Currency, amount: Decimal, reason: str, cash_after: Decimal
+) -> str:
+    return "\n".join(
+        [
+            "<b>Проверьте корректировку</b>",
+            f"Касса: {currency}",
+            f"Изменение: {format_signed(amount)} {currency}",
+            f"Причина: {esc(reason)}",
+            "",
+            "<b>После сохранения:</b>",
+            cash_line(currency, cash_after),
+        ]
+    )
+
+
+def adjustment_saved(currency: Currency, cash_after: Decimal) -> str:
+    return f"{ADJUSTMENT_SAVED}\n{cash_line(currency, cash_after)}"
+
+
+# --- Record card and history (TZ 12.5, 12.6) ------------------------------------------------
+
+BTN_CANCEL_RECORD = "Отменить запись"
+BTN_CLIENT = "Клиент"
+BTN_CONFIRM_CANCEL = "Да, отменить"
+RECORD_NOT_FOUND = "Запись не найдена."
+HISTORY_EMPTY = "Записей пока нет."
+ASK_CANCEL_REASON = "Напишите причину отмены:"
+ALREADY_REVERSED = "Эта запись уже отменена."
+CANNOT_REVERSE_REVERSAL = "Отмену отменить нельзя. Если запись отменили зря, внесите её заново."
+ONLY_AUTHOR_CAN_CANCEL = "Отменить запись может только тот, кто её внёс."
+
+
+def history_title(client_name: str) -> str:
+    return f"<b>История записей: {esc(client_name)}</b>"
+
+
+def history_button(
+    *,
+    item_id: int,
+    op_type: OperationType,
+    op_date: date,
+    debt_amount: Decimal,
+    debt_currency: Currency,
+    reversal_of_id: int | None,
+    reversed_by_id: int | None,
+) -> str:
+    """ "№15 · 25.09 · Мне вернули · 1 000 USD" (+ " · отменена")."""
+    text = (
+        f"№{item_id} · {format_short_date(op_date)} · {record_label(op_type, reversal_of_id)}"
+        f" · {format_money(debt_amount, debt_currency)}"
+    )
+    return f"{text} · отменена" if reversed_by_id is not None else text
+
+
+def record_amount_lines(operation: Operation) -> list[str]:
+    return amount_lines(
+        operation.type,
+        operation.debt_amount,
+        operation.debt_currency,
+        operation.cash_amount,
+        operation.cash_currency,
+        operation.rate,
+        operation.rate_base,
+        operation.rate_quote,
+    )
+
+
+def record_card(operation: Operation, reversal: Operation | None, zone: ZoneInfo) -> str:
+    """TZ 12.5. `operation.client` and `operation.author` must be loaded."""
+    if operation.reversal_of_id is not None:
+        title = f"<b>Запись №{operation.id} · Отмена записи №{operation.reversal_of_id}</b>"
+    else:
+        title = f"<b>Запись №{operation.id} · {TYPE_LABEL[operation.type]}</b>"
+    lines = [title, f"Клиент: {esc(operation.client.name)}", *record_amount_lines(operation)]
+    lines.append(f"Дата: {format_date(operation.op_date)}")
+    if operation.comment:
+        lines.append(f"Комментарий: {esc(operation.comment)}")
+    lines.append(
+        f"Автор: {esc(user_name(operation.author))} · "
+        f"внесено {format_datetime(operation.created_at, zone)}"
+    )
+    if operation.reversal_reason is not None:
+        lines.append(f"Причина: {esc(operation.reversal_reason)}")
+    if reversal is not None:
+        lines.append(
+            f"Статус: отменена записью №{reversal.id} (причина: {esc(reversal.reversal_reason)})"
+        )
+    return "\n".join(lines)
+
+
+def confirm_cancel(
+    operation: Operation, reason: str, balance_after: Decimal, cash_after: Decimal
+) -> str:
+    """TZ 8.3."""
+    return "\n".join(
+        [
+            f"<b>Отменить запись №{operation.id}?</b>",
+            record_header(operation.type, operation.client.name),
+            *record_amount_lines(operation),
+            f"Причина: {esc(reason)}",
+            "",
+            "<b>После отмены:</b>",
+            balance_line(operation.client.name, balance_after, operation.debt_currency),
+            cash_line(operation.cash_currency, cash_after),
+        ]
+    )
+
+
+def record_cancelled(number: int, client_name: str, balance: Decimal, currency: Currency) -> str:
+    return f"Запись №{number} отменена.\n{balance_line(client_name, balance, currency)}"
+
+
+def record_summary(operation: Operation) -> str:
+    """ "Мне вернули · Тимур · 1 000 USD" (with the payment for another currency)."""
+    money = format_money(operation.debt_amount, operation.debt_currency)
+    if operation.cash_currency != operation.debt_currency:
+        money = f"{format_money(operation.cash_amount, operation.cash_currency)} → {money}"
+    return f"{TYPE_LABEL[operation.type]} · {esc(operation.client.name)} · {money}"
+
+
+def helper_cancelled_notice(helper: User, operation: Operation, reason: str) -> str:
+    """TZ 12.10."""
+    return "\n".join(
+        [
+            "<b>Помощник отменил запись</b>",
+            f"Кто: {esc(user_name_with_username(helper))}",
+            f"Запись №{operation.id}: {record_summary(operation)}",
+            f"Причина: {esc(reason)}",
+        ]
+    )

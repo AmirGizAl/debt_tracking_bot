@@ -100,3 +100,48 @@ class RecordCb(CallbackData, prefix="r"):
 
     action: RecordAction
     operation_id: int
+
+
+class CashAction(StrEnum):
+    SHOW = "show"
+    MOVEMENTS = "mv"
+    ADJUSTMENT_INFO = "ai"
+    ADJUST = "adj"
+
+
+class CashCb(CallbackData, prefix="k"):
+    action: CashAction
+    page: int = 0
+    item_id: int = 0
+
+
+class AdjAction(StrEnum):
+    CURRENCY = "cur"
+    ADD = "add"
+    REMOVE = "rem"
+    SAVE = "save"
+    DONT_SAVE = "no"
+    BACK = "back"
+
+
+class AdjCb(CallbackData, prefix="aj"):
+    """Steps of the cash adjustment scenario (current screen only)."""
+
+    action: AdjAction
+    value: str = ""
+
+
+class RevAction(StrEnum):
+    CONFIRM = "ok"
+    BACK = "back"
+
+
+class RevCb(CallbackData, prefix="rv"):
+    """Steps of the reversal scenario (current screen only)."""
+
+    action: RevAction
+
+
+class HistoryCb(CallbackData, prefix="h"):
+    client_id: int
+    page: int = 0

@@ -6,14 +6,17 @@ repeated "Сохранить" (same request_id) returns the record saved the fir
 """
 
 import uuid
+from dataclasses import dataclass
 from datetime import date
+from decimal import Decimal
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import aliased, joinedload
 
 from app.db.models import Client, Operation, User
+from app.domain.currency import Currency
 from app.domain.errors import (
     AlreadyReversed,
     CannotReverseReversal,
@@ -21,9 +24,10 @@ from app.domain.errors import (
     OperationNotFound,
     PermissionDenied,
 )
-from app.domain.operations import OperationDraft, compute_terms
+from app.domain.operations import OperationDraft, OperationType, compute_terms
 from app.services import cash
 from app.services.clients import normalize_comment
+from app.services.pagination import Page, paginate
 from app.services.transactions import isolated
 
 COMMENT_MAX = 500
@@ -169,3 +173,36 @@ async def reverse_operation(
             # The unique index on reversal_of_id caught a concurrent second reversal.
             raise AlreadyReversed(operation_id) from exc
         raise
+
+
+@dataclass(frozen=True)
+class RecordLine:
+    """One row of a record list (client history)."""
+
+    id: int
+    type: OperationType
+    op_date: date
+    debt_amount: Decimal
+    debt_currency: Currency
+    reversal_of_id: int | None
+    reversed_by_id: int | None
+
+
+async def client_history(session: AsyncSession, client_id: int, page: int) -> Page[RecordLine]:
+    """Records of a client, newest first (TZ 12.6)."""
+    reversal = aliased(Operation)
+    statement = (
+        select(
+            Operation.id,
+            Operation.type,
+            Operation.op_date,
+            Operation.debt_amount,
+            Operation.debt_currency,
+            Operation.reversal_of_id,
+            reversal.id,
+        )
+        .outerjoin(reversal, reversal.reversal_of_id == Operation.id)
+        .where(Operation.client_id == client_id)
+        .order_by(Operation.op_date.desc(), Operation.id.desc())
+    )
+    return await paginate(session, statement, page, row_mapper=lambda row: RecordLine(*row))

@@ -1,17 +1,21 @@
 """Cash per currency: never stored, always summed from the journal (TZ 7.3, 7.4, 12.7)."""
 
 import uuid
-from datetime import date
+from dataclasses import dataclass
+from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import func, literal, null, select, union_all
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased, joinedload
 
-from app.db.models import CashAdjustment, Operation, User
+from app.db.models import CashAdjustment, Client, Operation, User
 from app.domain.currency import CURRENCIES, Currency
 from app.domain.errors import EmptyText, InsufficientCash, InvalidNumber, NumberProblem, TextTooLong
 from app.domain.money import MAX_AMOUNT, quantize_money
+from app.domain.operations import OperationType
+from app.services.pagination import Page, paginate
 from app.services.transactions import isolated
 from app.services.users import require_owner
 
@@ -137,3 +141,63 @@ async def create_adjustment(
         if existing is not None:
             return existing, False
         raise
+
+
+@dataclass(frozen=True)
+class Movement:
+    """A line of "Движение денег": a record or an adjustment (TZ 12.7)."""
+
+    is_adjustment: bool
+    item_id: int
+    day: date
+    created_at: datetime
+    currency: Currency
+    amount: Decimal  # signed change of the cash
+    op_type: OperationType | None
+    title: str  # client name, or the reason of an adjustment
+    reversal_of_id: int | None
+    reversed_by_id: int | None
+
+
+async def movements(session: AsyncSession, page: int) -> Page[Movement]:
+    """Records and adjustments together, newest first."""
+    reversal = aliased(Operation)
+    records = (
+        select(
+            literal(False).label("is_adjustment"),
+            Operation.id.label("item_id"),
+            Operation.op_date.label("day"),
+            Operation.created_at.label("created_at"),
+            Operation.cash_currency.label("currency"),
+            Operation.cash_delta.label("amount"),
+            Operation.type.label("op_type"),
+            Client.name.label("title"),
+            Operation.reversal_of_id.label("reversal_of_id"),
+            reversal.id.label("reversed_by_id"),
+        )
+        .join(Client, Client.id == Operation.client_id)
+        .outerjoin(reversal, reversal.reversal_of_id == Operation.id)
+    )
+    adjustments = select(
+        literal(True),
+        CashAdjustment.id,
+        CashAdjustment.adj_date,
+        CashAdjustment.created_at,
+        CashAdjustment.currency,
+        CashAdjustment.amount,
+        null(),
+        CashAdjustment.reason,
+        null(),
+        null(),
+    )
+    combined = union_all(records, adjustments).subquery()
+    statement = select(combined).order_by(combined.c.day.desc(), combined.c.created_at.desc())
+    return await paginate(session, statement, page, row_mapper=lambda row: Movement(*row))
+
+
+async def get_adjustment(session: AsyncSession, adjustment_id: int) -> CashAdjustment | None:
+    return await session.scalar(
+        select(CashAdjustment)
+        .where(CashAdjustment.id == adjustment_id)
+        .options(joinedload(CashAdjustment.author))
+    )

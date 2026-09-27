@@ -6,8 +6,9 @@ from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.bot import texts
-from app.bot.callbacks import ClientsAction, ClientsCb, MenuAction, MenuCb
+from app.bot.callbacks import ClientsAction, ClientsCb, HistoryCb, MenuAction, MenuCb
 from app.bot.keyboards import clients as kb
+from app.bot.keyboards import records as records_kb
 from app.bot.states import ClientsFlow
 from app.bot.ui import (
     OnScreen,
@@ -21,7 +22,7 @@ from app.bot.ui import (
 )
 from app.db.models import Client, User
 from app.domain import errors
-from app.services import balances, clients
+from app.services import balances, clients, operations
 
 router = Router(name="clients")
 
@@ -411,11 +412,54 @@ async def delete_client(
     await finish(bot, state, callback.message.chat.id, user, texts.client_deleted(client.name))
 
 
+# --- history (TZ 12.6) -------------------------------------------------------------------------
+
+
+async def _show_history(
+    callback: CallbackQuery,
+    state: FSMContext,
+    bot: Bot,
+    session: AsyncSession,
+    client_id: int,
+    number: int,
+) -> None:
+    client = await _client_or_stale(callback, session, client_id)
+    if client is None:
+        return
+    await leave_scenario(callback, state, bot)
+    page = await operations.client_history(session, client.id, number)
+    text = texts.history_title(client.name)
+    if page.total == 0:
+        text += f"\n{texts.HISTORY_EMPTY}"
+    await edit_or_send(bot, callback.message, text, records_kb.history(client.id, page))
+    await answer(callback)
+
+
+@router.callback_query(_action(ClientsAction.HISTORY))
+async def open_history(
+    callback: CallbackQuery,
+    callback_data: ClientsCb,
+    state: FSMContext,
+    bot: Bot,
+    session: AsyncSession,
+) -> None:
+    await _show_history(callback, state, bot, session, callback_data.client_id, 0)
+
+
+@router.callback_query(HistoryCb.filter())
+async def history_page(
+    callback: CallbackQuery,
+    callback_data: HistoryCb,
+    state: FSMContext,
+    bot: Bot,
+    session: AsyncSession,
+) -> None:
+    await _show_history(callback, state, bot, session, callback_data.client_id, callback_data.page)
+
+
 # --- not built yet -----------------------------------------------------------------------------
 
 
-@router.callback_query(
-    ClientsCb.filter(F.action.in_({ClientsAction.HISTORY, ClientsAction.STATEMENT}))
-)
+@router.callback_query(_action(ClientsAction.STATEMENT))
 async def not_implemented(callback: CallbackQuery) -> None:
     await answer(callback, texts.NOT_IMPLEMENTED)

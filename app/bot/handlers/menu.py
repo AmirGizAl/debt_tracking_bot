@@ -4,7 +4,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
 from app.bot import texts
-from app.bot.callbacks import MenuAction, MenuCb, NoopCb, RecordCb
+from app.bot.callbacks import MenuAction, MenuCb, NoopCb
 from app.bot.keyboards.common import main_menu
 from app.bot.ui import answer, drop_keyboard, edit_or_send, reset_scenario, screen_id
 from app.db.models import User
@@ -47,7 +47,6 @@ async def noop(callback: CallbackQuery) -> None:
     await answer(callback)
 
 
-@router.callback_query(RecordCb.filter())
 @router.callback_query(MenuCb.filter())
 async def not_implemented(callback: CallbackQuery) -> None:
     # Placeholder for sections that are not built yet; real routers are included earlier.

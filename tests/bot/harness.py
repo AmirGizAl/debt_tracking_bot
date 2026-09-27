@@ -426,7 +426,7 @@ class UserClient:
         data = target.callback_data(button_text)
         assert data is not None, f"no button {button_text!r} in {target.buttons}"
         answer = await self.press(data, target)
-        return answer.text
+        return readable(answer.text) if answer.text is not None else None
 
     # --- inspection -------------------------------------------------------------------------
 

@@ -14,11 +14,13 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.bot import texts
 from app.bot.handlers import (
+    cash,
     clients,
     errors,
     fallback,
     lend_borrow,
     menu,
+    operation_card,
     operation_steps,
     repay,
     start,
@@ -79,6 +81,8 @@ def create_dispatcher(
         lend_borrow.router,
         repay.router,
         operation_steps.router,
+        operation_card.router,
+        cash.router,
         menu.router,
         fallback.router,
     )

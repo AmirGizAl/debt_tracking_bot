@@ -26,3 +26,16 @@ class OperationFlow(StatesGroup):
     custom_date = State()
     comment = State()
     confirm = State()
+
+
+class AdjustmentFlow(StatesGroup):
+    currency = State()
+    direction = State()
+    amount = State()
+    reason = State()
+    confirm = State()
+
+
+class ReversalFlow(StatesGroup):
+    reason = State()
+    confirm = State()
