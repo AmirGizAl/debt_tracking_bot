@@ -22,8 +22,6 @@ class OperationFlow(StatesGroup):
     pay_currency = State()
     amount = State()
     rate = State()
-    date = State()
-    custom_date = State()
     comment = State()
     confirm = State()
 
@@ -45,6 +43,4 @@ class ReportFlow(StatesGroup):
     rates = State()
     client = State()
     period = State()
-    period_start = State()
-    period_end = State()
     format = State()

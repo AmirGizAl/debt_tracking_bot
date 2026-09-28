@@ -94,17 +94,6 @@ def pay_currencies(debt_currency: Currency) -> InlineKeyboardMarkup:
     )
 
 
-def dates() -> InlineKeyboardMarkup:
-    return markup(
-        [
-            button(texts.BTN_TODAY, _cb(OpAction.TODAY)),
-            button(texts.BTN_YESTERDAY, _cb(OpAction.YESTERDAY)),
-            button(texts.BTN_OTHER_DATE, _cb(OpAction.OTHER_DATE)),
-        ],
-        _back_row(),
-    )
-
-
 def confirm() -> InlineKeyboardMarkup:
     return markup(
         [

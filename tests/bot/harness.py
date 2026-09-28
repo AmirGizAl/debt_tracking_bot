@@ -21,7 +21,7 @@ from typing import Any
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.session.base import BaseSession
-from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, TelegramMigrateToChat
 from aiogram.fsm.storage.base import StorageKey
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.methods import (
@@ -29,6 +29,7 @@ from aiogram.methods import (
     DeleteWebhook,
     EditMessageReplyMarkup,
     EditMessageText,
+    GetChat,
     GetMe,
     SendChatAction,
     SendDocument,
@@ -37,9 +38,14 @@ from aiogram.methods import (
     TelegramMethod,
 )
 from aiogram.types import (
+    AcceptedGiftTypes,
     BufferedInputFile,
     CallbackQuery,
     Chat,
+    ChatFullInfo,
+    ChatMemberLeft,
+    ChatMemberMember,
+    ChatMemberUpdated,
     Document,
     InlineKeyboardMarkup,
     Message,
@@ -167,6 +173,9 @@ class FakeTelegram(BaseSession):
         self.callback_answers: dict[str, AnswerCallbackQuery] = {}
         self.chat_actions: list[SendChatAction] = []
         self.unreachable_chats: set[int] = set()
+        # Groups the bot is a member of (id -> title) and groups that became supergroups.
+        self.groups: dict[int, str] = {}
+        self.migrated_chats: dict[int, int] = {}
         # The message a user is looking at: the newest sent one or the one whose text was
         # just edited (removing buttons alone does not count).
         self.last_shown: dict[int, FakeMessage] = {}
@@ -210,6 +219,12 @@ class FakeTelegram(BaseSession):
     def _check_chat(self, method: TelegramMethod[Any], chat_id: int | str) -> int:
         if int(chat_id) in self.unreachable_chats:
             raise TelegramForbiddenError(method, "Forbidden: bot can't initiate conversation")
+        if int(chat_id) in self.migrated_chats:
+            raise TelegramMigrateToChat(
+                method,
+                "Bad Request: group chat was upgraded to a supergroup chat",
+                self.migrated_chats[int(chat_id)],
+            )
         return int(chat_id)
 
     @staticmethod
@@ -345,6 +360,25 @@ class FakeTelegram(BaseSession):
     def _do_GetMe(self, method: GetMe) -> TgUser:
         return BOT_USER
 
+    def _do_GetChat(self, method: GetChat) -> ChatFullInfo:
+        chat_id = self._check_chat(method, method.chat_id)
+        if chat_id not in self.groups:
+            raise TelegramBadRequest(method, "Bad Request: chat not found")
+        return ChatFullInfo(
+            id=chat_id,
+            type="supergroup",
+            title=self.groups[chat_id],
+            accent_color_id=0,
+            max_reaction_count=11,
+            accepted_gift_types=AcceptedGiftTypes(
+                unlimited_gifts=False,
+                limited_gifts=False,
+                unique_gifts=False,
+                premium_subscription=False,
+                gifts_from_channels=False,
+            ),
+        )
+
 
 class JsonMemoryStorage(MemoryStorage):
     """MemoryStorage that stores data the way RedisStorage does: through JSON.
@@ -383,6 +417,25 @@ class Harness:
 
     async def feed(self, update: Update) -> None:
         await self.dispatcher.feed_update(self.bot, update)
+
+    def chat(self, chat_id: int) -> list[FakeMessage]:
+        """Messages the bot has sent to a chat, e.g. to the notification group."""
+        return [message for message in self.telegram.history[chat_id] if message.from_bot]
+
+    async def add_bot_to_chat(
+        self, by: "UserClient", chat_id: int, title: str | None, chat_type: str = "supergroup"
+    ) -> None:
+        """`by` adds the bot to a group (Telegram sends the bot a my_chat_member update)."""
+        if chat_type != "private":
+            self.telegram.groups[chat_id] = title or ""
+        event = ChatMemberUpdated(
+            chat=Chat(id=chat_id, type=chat_type, title=title),
+            from_user=by.tg_user,
+            date=datetime.now(UTC),
+            old_chat_member=ChatMemberLeft(user=BOT_USER),
+            new_chat_member=ChatMemberMember(user=BOT_USER),
+        )
+        await self.feed(Update(update_id=self.next_update_id(), my_chat_member=event))
 
     def next_update_id(self) -> int:
         return next(self._update_ids)

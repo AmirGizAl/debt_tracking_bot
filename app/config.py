@@ -16,12 +16,14 @@ class DatabaseSettings(BaseSettings):
 class Settings(DatabaseSettings):
     bot_token: SecretStr
     owner_telegram_id: int
+    # Group (or channel) where the bot posts new records; the bot must be a member there.
+    group_chat_id: int | None = None
     redis_url: str | None = None
     tz: str = "Europe/Moscow"  # the customer works in Moscow time
     log_level: str = "INFO"
     proxy_url: str | None = None
 
-    @field_validator("redis_url", "proxy_url", mode="before")
+    @field_validator("redis_url", "proxy_url", "group_chat_id", mode="before")
     @classmethod
     def _empty_to_none(cls, value: object) -> object:
         if isinstance(value, str) and not value.strip():
@@ -33,6 +35,15 @@ class Settings(DatabaseSettings):
     def _check_owner_id(cls, value: int) -> int:
         if value <= 0:
             raise ValueError("OWNER_TELEGRAM_ID must be a positive Telegram user id")
+        return value
+
+    @field_validator("group_chat_id")
+    @classmethod
+    def _check_group_id(cls, value: int | None) -> int | None:
+        if value is not None and value >= 0:
+            raise ValueError(
+                "GROUP_CHAT_ID must be the negative id of a group, e.g. -1001234567890"
+            )
         return value
 
     @field_validator("tz")

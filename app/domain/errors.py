@@ -47,14 +47,6 @@ class InvalidConversion(DomainError):
         self.problem = problem
 
 
-class InvalidDate(DomainError):
-    pass
-
-
-class FutureDate(DomainError):
-    pass
-
-
 class TextTooLong(DomainError):
     def __init__(self, limit: int) -> None:
         super().__init__(f"longer than {limit}")

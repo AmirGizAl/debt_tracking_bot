@@ -1,7 +1,8 @@
 """Record scenarios in one currency through the bot UI (TZ 12.2-12.4, 15.1 scenarios 2-5, 8)."""
 
-from datetime import timedelta
+from datetime import date
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 import pytest
 from aiogram.fsm.storage.base import StorageKey
@@ -9,9 +10,10 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.bot import texts
+from app.bot.handlers import operation_steps
 from app.db.models import Client, Operation, User
 from app.domain.currency import Currency
-from app.domain.dates import format_date, today
+from app.domain.dates import today
 from app.domain.operations import OperationType
 from app.services import balances, cash, users
 from tests.bot.harness import Harness, UserClient
@@ -61,6 +63,9 @@ async def test_scenarios_2_to_5(
             f"Дата: {today_text()}",
             "Комментарий: на ремонт машины",
             "",
+            "Сейчас:",
+            "Азамат: долга в USD нет",
+            "",
             "После сохранения:",
             "Азамат должен вам: 1 000 USD",
             "В кассе USD: 9 000",
@@ -100,6 +105,9 @@ async def test_scenarios_2_to_5(
             "Сумма: 400 USD",
             f"Дата: {today_text()}",
             "",
+            "Сейчас:",  # the debt the repayment closes (customer's request of 28.09.2026)
+            "Азамат должен вам: 1 000 USD",
+            "",
             "После сохранения:",
             "Азамат должен вам: 600 USD",
             "В кассе USD: 9 400",
@@ -114,6 +122,7 @@ async def test_scenarios_2_to_5(
 
     # 5. «Я вернул» Бекзату 20 000 RUB.
     await repay_same(owner_client, texts.BTN_REPAY_OUT, "Бекзат", "RUB · вы должны 50 000", "20000")
+    assert "Сейчас:\nБекзат: вы должны 50 000 RUB\n" in owner_client.last.text
     assert "Бекзат: вы должны 30 000 RUB\nВ кассе RUB: 530 000" in owner_client.last.text
     assert await save(owner_client) == "Запись №4 сохранена."
 
@@ -140,7 +149,7 @@ async def test_scenario_8_not_enough_cash_on_amount_step(
     )
     assert await records_count(session) == 0
     await owner_client.send("9100")  # the whole cash is fine
-    assert owner_client.last.text.endswith("Дата записи?")
+    assert owner_client.last.text.endswith(texts.ASK_RECORD_COMMENT)
 
 
 async def test_not_enough_cash_at_save_time(
@@ -241,13 +250,12 @@ async def test_back_goes_through_every_step(
     await make_client(session, funded, "Азамат")
     await new_debt(owner_client, texts.BTN_LEND, "Азамат", "USD", "100")
     screens = []
-    for _ in range(5):
+    for _ in range(4):
         await owner_client.click(texts.BTN_BACK)
         screens.append(owner_client.last.text.splitlines()[-1])
 
     assert screens == [
         texts.ASK_RECORD_COMMENT,
-        "Дата записи?",
         "Введите сумму в USD:",
         texts.ASK_CURRENCY,
         texts.CHOOSE_CLIENT_HINT,
@@ -323,37 +331,54 @@ async def test_wrong_amount_keeps_the_step(
 
     assert owner_client.last.text.endswith(expected)
     await owner_client.send("10")
-    assert owner_client.last.text.endswith("Дата записи?")
+    assert owner_client.last.text.endswith(texts.ASK_RECORD_COMMENT)
 
 
-async def test_other_date(owner_client: UserClient, session: AsyncSession, funded: User) -> None:
+async def test_record_is_dated_today_without_asking(
+    owner_client: UserClient, session: AsyncSession, funded: User
+) -> None:
+    # The date step was removed at the customer's request (28.09.2026).
     await make_client(session, funded, "Азамат")
     await begin(owner_client, texts.BTN_BORROW, "Азамат")
     await owner_client.click("USD")
+
     await owner_client.send("10")
-    await owner_client.click(texts.BTN_OTHER_DATE)
 
-    await owner_client.send("32.09.2026")
-    assert owner_client.last.text == texts.INVALID_DATE
-    await owner_client.send("01.01.2999")
-    assert owner_client.last.text == texts.FUTURE_DATE
-    await owner_client.send("15.01")
+    assert owner_client.last.text == f"Взял в долг: Азамат · 10 USD\n\n{texts.ASK_RECORD_COMMENT}"
+    assert owner_client.last.button_texts == [texts.BTN_SKIP, texts.BTN_BACK, texts.BTN_HOME]
     await owner_client.click(texts.BTN_SKIP)
+    assert f"Дата: {today_text()}" in owner_client.last.text
+    await save(owner_client)
+    stored = await session.scalar(select(Operation))
+    assert stored is not None
+    assert stored.op_date == today(TZ)
 
-    year = today_text()[-4:]
-    assert f"Дата: 15.01.{year}" in owner_client.last.text
 
+async def test_record_date_is_taken_when_saving(
+    owner_client: UserClient,
+    session: AsyncSession,
+    funded: User,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A confirmation left open over midnight saves the record with the new day.
+    days = iter([date(2026, 9, 27), date(2026, 9, 28)])
+    zones: list[ZoneInfo] = []
 
-async def test_yesterday(owner_client: UserClient, session: AsyncSession, funded: User) -> None:
+    def fake_today(zone: ZoneInfo) -> date:
+        zones.append(zone)
+        return next(days)
 
+    monkeypatch.setattr(operation_steps, "today", fake_today)
     await make_client(session, funded, "Азамат")
-    await begin(owner_client, texts.BTN_BORROW, "Азамат")
-    await owner_client.click("USD")
-    await owner_client.send("10")
-    await owner_client.click(texts.BTN_YESTERDAY)
-    await owner_client.click(texts.BTN_SKIP)
+    await new_debt(owner_client, texts.BTN_BORROW, "Азамат", "USD", "10")
+    assert "Дата: 27.09.2026" in owner_client.last.text
 
-    assert f"Дата: {format_date(today(TZ) - timedelta(days=1))}" in owner_client.last.text
+    await save(owner_client)
+
+    stored = await session.scalar(select(Operation))
+    assert stored is not None
+    assert stored.op_date == date(2026, 9, 28)
+    assert zones == [TZ, TZ]  # Moscow time
 
 
 async def test_search_on_client_step(
@@ -379,7 +404,6 @@ async def test_comment_is_escaped_and_limited(
     await begin(owner_client, texts.BTN_BORROW, "<Иван & Ко>")
     await owner_client.click("USD")
     await owner_client.send("10")
-    await owner_client.click(texts.BTN_TODAY)
 
     await owner_client.send("я" * 501)
     assert "не больше 500 символов" in owner_client.last.text

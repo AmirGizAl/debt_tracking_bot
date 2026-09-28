@@ -38,7 +38,6 @@ async def pay_other(
 
 async def finish_steps(client: UserClient, rate: str) -> None:
     await client.send(rate)
-    await client.click(texts.BTN_TODAY)
     await client.click(texts.BTN_SKIP)
 
 
@@ -86,6 +85,9 @@ async def test_scenario_6_debt_in_usd_paid_in_kgs(
             "Закрывает долг: 600 USD",
             f"Дата: {today_text()}",
             "",
+            "Сейчас:",
+            "Азамат должен вам: 600 USD",
+            "",
             "После сохранения:",
             "Азамат: долга в USD нет",
             "В кассе KGS: 352 500",
@@ -119,6 +121,9 @@ async def test_scenario_7_debt_in_rub_paid_in_usd(
             "Курс: 1 USD = 90 RUB",
             "Закрывает ваш долг: 27 000 RUB",
             f"Дата: {today_text()}",
+            "",
+            "Сейчас:",
+            "Бекзат: вы должны 30 000 RUB",
             "",
             "После сохранения:",
             "Бекзат: вы должны 3 000 RUB",
@@ -171,7 +176,9 @@ async def test_wrong_rate_keeps_the_step(
     lines = owner_client.last.text.split("\n\n")
     assert lines[-2:] == [problem, "Сколько сомов за 1 USD?"]
     await owner_client.send("87,5")
-    assert owner_client.last.text.endswith("Дата записи?")
+    assert owner_client.last.text == (
+        f"Мне вернули: Азамат · 1 000 KGS\n\n{texts.ASK_RECORD_COMMENT}"
+    )
 
 
 async def test_rate_that_turns_payment_into_zero_is_refused(
@@ -229,7 +236,7 @@ async def test_back_through_other_currency_steps(
     owner_client: UserClient, state_after_5: tuple[Client, Client]
 ) -> None:
     await pay_other(owner_client, texts.BTN_REPAY_IN, "Азамат", "USD · должен 600", "KGS", "1000")
-    await owner_client.send("87,5")  # now on the date step
+    await owner_client.send("87,5")  # now on the comment step
     screens = []
     for _ in range(5):
         await owner_client.click(texts.BTN_BACK)
@@ -253,7 +260,6 @@ async def test_switching_back_to_same_currency_forgets_the_rate(
         await owner_client.click(texts.BTN_BACK)  # back to "same or other currency"
     await owner_client.click(texts.BTN_SAME_CURRENCY)
     await owner_client.send("100")
-    await owner_client.click(texts.BTN_TODAY)
     await owner_client.click(texts.BTN_SKIP)
 
     assert "Сумма: 100 USD" in owner_client.last.text

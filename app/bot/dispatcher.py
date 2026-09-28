@@ -18,6 +18,7 @@ from app.bot.handlers import (
     clients,
     errors,
     fallback,
+    group,
     lend_borrow,
     menu,
     operation_card,
@@ -77,6 +78,7 @@ def create_dispatcher(
 
     dispatcher.include_routers(
         errors.router,
+        group.router,  # only the bot's own membership in groups, never messages there
         # Commands first: /menu and /cancel must win over any step that waits for text.
         start.router,
         menu.router,
@@ -103,6 +105,23 @@ async def set_commands(bot: Bot) -> None:
         await bot.set_my_commands(commands, scope=BotCommandScopeDefault())
     except TelegramAPIError as exc:
         logger.warning("Cannot register bot commands, will retry on next start: %s", exc)
+
+
+async def check_group(bot: Bot, settings: Settings) -> None:
+    """Log where group notifications go, or why they cannot (e.g. the bot is not in the group)."""
+    if settings.group_chat_id is None:
+        logger.info("GROUP_CHAT_ID is not set: nothing is posted to a group")
+        return
+    try:
+        chat = await bot.get_chat(settings.group_chat_id)
+    except TelegramAPIError as exc:
+        logger.warning(
+            "Cannot reach the group GROUP_CHAT_ID=%s, is the bot a member there? %s",
+            settings.group_chat_id,
+            exc,
+        )
+        return
+    logger.info("New records are posted to the group %r (chat_id=%s)", chat.title, chat.id)
 
 
 async def prepare_bot(bot: Bot, attempts: int = 12, delay: float = 5.0) -> None:

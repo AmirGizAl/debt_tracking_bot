@@ -1,7 +1,7 @@
 """«Мне вернули» and «Я вернул» (TZ 12.4).
 
 client -> which debt -> same/other currency -> [payment currency] -> amount -> [rate]
--> date -> comment -> confirmation with warnings.
+-> comment -> confirmation with warnings. The record is dated today (agreed on 28.09.2026).
 """
 
 from aiogram import Bot, F, Router
@@ -122,4 +122,4 @@ async def receive_rate(message: Message, state: FSMContext, bot: Bot) -> None:
         return
     flow.rate = rate
     await operation.store(state, flow)
-    await operation.show_date(message, state, bot, flow)
+    await operation.show_comment(message, state, bot, flow)

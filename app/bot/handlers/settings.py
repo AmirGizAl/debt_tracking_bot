@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.bot import texts
 from app.bot.callbacks import MenuAction, MenuCb, SettingsAction, SettingsCb
 from app.bot.keyboards import settings as kb
+from app.bot.notify import notify_group
 from app.bot.states import HelperFlow
 from app.bot.ui import (
     answer,
@@ -146,6 +147,7 @@ async def delete_helper(
     bot: Bot,
     session: AsyncSession,
     user: User,
+    settings: Settings,
 ) -> None:
     if not await _owner_only(callback, user):
         return
@@ -166,3 +168,4 @@ async def delete_helper(
     await answer(callback)
     await drop_keyboard(bot, callback.message.chat.id, callback.message.message_id)
     await finish(bot, state, callback.message.chat.id, user, texts.helper_deleted(helper))
+    await notify_group(bot, settings, texts.helper_deleted(helper))

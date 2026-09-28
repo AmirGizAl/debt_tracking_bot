@@ -31,11 +31,16 @@ from app.config import Settings
 from app.db.models import User
 from app.domain import errors
 from app.domain.currency import Currency
-from app.domain.dates import month_bounds, parse_date, previous_month_bounds, today, year_start
+from app.domain.dates import today
 from app.domain.money import parse_rate
 from app.services import cash, clients, reports
 from app.services.reports import PERIOD_KINDS, ReportFormat, ReportKind
-from app.services.reports.data import Period, currencies_needing_rates
+from app.services.reports.data import (
+    Period,
+    PeriodPreset,
+    currencies_needing_rates,
+    preset_period,
+)
 
 router = Router(name="reports")
 
@@ -103,13 +108,6 @@ async def _show_period(event: Event, state: FSMContext, bot: Bot) -> None:
         question = f"{texts.report_client_line(texts.esc(data['client_name']))}\n{question}"
     await state.set_state(ReportFlow.period)
     await show_step(event, state, bot, texts.report_step(_title(data), question), kb.periods())
-
-
-async def _ask_period_date(
-    event: Event, state: FSMContext, bot: Bot, target: ReportFlow | Any, text: str
-) -> None:
-    await state.set_state(target)
-    await show_step(event, state, bot, text, kb.back_only())
 
 
 async def _show_format(event: Event, state: FSMContext, bot: Bot) -> None:
@@ -266,16 +264,6 @@ async def results_page(
 # --- period ------------------------------------------------------------------------------------
 
 
-def _preset(key: str, current: date) -> Period:
-    if key == "month":
-        return Period(*month_bounds(current))
-    if key == "last":
-        return Period(*previous_month_bounds(current))
-    if key == "year":
-        return Period(year_start(current), current)
-    return Period()
-
-
 async def _store_period(state: FSMContext, period: Period) -> None:
     await state.update_data(
         start=period.start.isoformat() if period.start else None,
@@ -287,48 +275,16 @@ async def _store_period(state: FSMContext, period: Period) -> None:
 async def choose_period(
     callback: CallbackQuery, callback_data: RepCb, state: FSMContext, bot: Bot, settings: Settings
 ) -> None:
-    if callback_data.value == "custom":
-        await _ask_period_date(
-            callback, state, bot, ReportFlow.period_start, texts.ASK_PERIOD_START
-        )
-    else:
-        await _store_period(state, _preset(callback_data.value, today(settings.zone)))
-        await _show_format(callback, state, bot)
+    try:
+        preset = PeriodPreset(callback_data.value)
+    except ValueError:
+        # A period button of the bot version before 28.09.2026: show the current ones.
+        await _show_period(callback, state, bot)
+        await answer(callback, texts.STALE_ACTION)
+        return
+    await _store_period(state, preset_period(preset, today(settings.zone)))
+    await _show_format(callback, state, bot)
     await answer(callback)
-
-
-@router.message(ReportFlow.period_start, F.text)
-async def receive_period_start(
-    message: Message, state: FSMContext, bot: Bot, settings: Settings
-) -> None:
-    assert message.text is not None
-    try:
-        start = parse_date(message.text, today(settings.zone), allow_future=True)
-    except errors.InvalidDate:
-        await _ask_period_date(message, state, bot, ReportFlow.period_start, texts.INVALID_DATE)
-        return
-    await state.update_data(start=start.isoformat())
-    await _ask_period_date(message, state, bot, ReportFlow.period_end, texts.ASK_PERIOD_END)
-
-
-@router.message(ReportFlow.period_end, F.text)
-async def receive_period_end(
-    message: Message, state: FSMContext, bot: Bot, settings: Settings
-) -> None:
-    assert message.text is not None
-    try:
-        end = parse_date(message.text, today(settings.zone), allow_future=True)
-    except errors.InvalidDate:
-        await _ask_period_date(message, state, bot, ReportFlow.period_end, texts.INVALID_DATE)
-        return
-    start = date.fromisoformat((await state.get_data())["start"])
-    if end < start:
-        await _ask_period_date(
-            message, state, bot, ReportFlow.period_end, texts.PERIOD_END_BEFORE_START
-        )
-        return
-    await state.update_data(end=end.isoformat())
-    await _show_format(message, state, bot)
 
 
 # --- format and the file -----------------------------------------------------------------------
@@ -391,12 +347,6 @@ async def back(callback: CallbackQuery, state: FSMContext, bot: Bot, session: As
     kind = ReportKind(data["kind"])
     if current == ReportFlow.client.state and data.get("query") is not None:
         await _show_client_step(callback, state, bot, session)
-    elif current == ReportFlow.period_end.state:
-        await _ask_period_date(
-            callback, state, bot, ReportFlow.period_start, texts.ASK_PERIOD_START
-        )
-    elif current == ReportFlow.period_start.state:
-        await _show_period(callback, state, bot)
     elif current == ReportFlow.period.state and kind == ReportKind.STATEMENT:
         if data.get("from_card"):
             client = await clients.get_client(session, data["client_id"])

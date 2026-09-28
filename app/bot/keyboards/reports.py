@@ -6,6 +6,7 @@ from app.bot.keyboards.common import button, home_button, markup, pager
 from app.db.models import Client
 from app.services.pagination import Page
 from app.services.reports import ReportFormat, ReportKind
+from app.services.reports.data import PeriodPreset
 
 KIND_BUTTONS = (
     (ReportKind.SUMMARY, texts.BTN_REPORT_SUMMARY),
@@ -15,12 +16,12 @@ KIND_BUTTONS = (
     (ReportKind.STATEMENT, texts.BTN_REPORT_STATEMENT),
 )
 
-PERIOD_PRESETS = {
-    "month": texts.BTN_THIS_MONTH,
-    "last": texts.BTN_LAST_MONTH,
-    "year": texts.BTN_THIS_YEAR,
-    "all": texts.BTN_ALL_TIME,
-    "custom": texts.BTN_CUSTOM_PERIOD,
+PERIOD_BUTTONS = {
+    PeriodPreset.TODAY: texts.BTN_PERIOD_TODAY,
+    PeriodPreset.WEEK: texts.BTN_PERIOD_WEEK,
+    PeriodPreset.MONTH: texts.BTN_PERIOD_MONTH,
+    PeriodPreset.YEAR: texts.BTN_PERIOD_YEAR,
+    PeriodPreset.ALL: texts.BTN_ALL_TIME,
 }
 
 
@@ -63,13 +64,13 @@ def search_results(page: Page[Client]) -> InlineKeyboardMarkup:
 
 
 def periods() -> InlineKeyboardMarkup:
-    def item(key: str) -> InlineKeyboardButton:
-        return button(PERIOD_PRESETS[key], _cb(RepAction.PERIOD, key))
+    def item(preset: PeriodPreset) -> InlineKeyboardButton:
+        return button(PERIOD_BUTTONS[preset], _cb(RepAction.PERIOD, preset))
 
     return markup(
-        [item("month"), item("last")],
-        [item("year"), item("all")],
-        [item("custom")],
+        [item(PeriodPreset.TODAY), item(PeriodPreset.WEEK)],
+        [item(PeriodPreset.MONTH), item(PeriodPreset.YEAR)],
+        [item(PeriodPreset.ALL)],
         _back_row(),
     )
 

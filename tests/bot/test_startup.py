@@ -83,13 +83,6 @@ async def _to_amount(client: UserClient) -> None:
 async def _to_comment(client: UserClient) -> None:
     await _to_amount(client)
     await client.send("100")
-    await client.click(texts.BTN_TODAY)
-
-
-async def _to_custom_date(client: UserClient) -> None:
-    await _to_amount(client)
-    await client.send("100")
-    await client.click(texts.BTN_OTHER_DATE)
 
 
 async def _to_helper_username(client: UserClient) -> None:
@@ -116,11 +109,11 @@ async def _to_cancel_reason(client: UserClient) -> None:
     await client.click(texts.BTN_CANCEL_RECORD)
 
 
-async def _to_period_start(client: UserClient) -> None:
+async def _to_statement_search(client: UserClient) -> None:
     await client.send("/menu")
     await client.click(texts.BTN_REPORTS)
-    await client.click(texts.BTN_REPORT_RECORDS)
-    await client.click(texts.BTN_CUSTOM_PERIOD)
+    await client.click(texts.BTN_REPORT_STATEMENT)
+    await client.click(texts.BTN_FIND)
 
 
 @pytest.mark.parametrize(
@@ -128,11 +121,10 @@ async def _to_period_start(client: UserClient) -> None:
     [
         _to_amount,
         _to_comment,
-        _to_custom_date,
         _to_helper_username,
         _to_adjustment_reason,
         _to_cancel_reason,
-        _to_period_start,
+        _to_statement_search,
     ],
 )
 @pytest.mark.parametrize("command", ["/cancel", "/menu"])

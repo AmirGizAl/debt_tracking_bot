@@ -26,8 +26,8 @@ async def begin(client: UserClient, button: str, name: str, *, new: bool = False
 
 
 async def fill_rest(client: UserClient, amount: str, comment: str | None = None) -> None:
+    """Amount, then comment (there is no date step: a record is always dated today)."""
     await client.send(amount)
-    await client.click(texts.BTN_TODAY)
     if comment is None:
         await client.click(texts.BTN_SKIP)
     else:

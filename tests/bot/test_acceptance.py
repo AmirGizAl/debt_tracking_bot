@@ -39,7 +39,6 @@ async def pay_other(
     await client.click(pay)
     await client.send(amount)
     await client.send(rate)
-    await client.click(texts.BTN_TODAY)
     await client.click(texts.BTN_SKIP)
 
 

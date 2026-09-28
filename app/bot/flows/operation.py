@@ -51,7 +51,6 @@ class Flow:
     pay_currency: Currency | None = None
     amount: Decimal | None = None
     rate: Decimal | None = None
-    op_date: date | None = None
     comment: str | None = None
     query: str | None = None
     new_client_name: str | None = None
@@ -71,9 +70,10 @@ class Flow:
         assert self.debt_currency is not None and self.pay_currency is not None
         return rate_pair(self.debt_currency, self.pay_currency)
 
-    def draft(self) -> OperationDraft:
+    def draft(self, op_date: date) -> OperationDraft:
+        """The record as it would be saved on `op_date` (always today, see handlers)."""
         assert self.client_id is not None and self.debt_currency is not None
-        assert self.amount is not None and self.op_date is not None
+        assert self.amount is not None
         return OperationDraft(
             request_id=uuid.UUID(self.request_id),
             type=self.op_type,
@@ -81,7 +81,7 @@ class Flow:
             debt_currency=self.debt_currency,
             cash_currency=self.cash_currency,
             cash_amount=self.amount,
-            op_date=self.op_date,
+            op_date=op_date,
             rate=self.rate if self.other_currency else None,
             comment=self.comment,
         )
@@ -92,8 +92,6 @@ class Flow:
         for key, value in asdict(self).items():
             if isinstance(value, Decimal | Currency | OperationType):
                 value = str(value)
-            elif isinstance(value, date):
-                value = value.isoformat()
             result[key] = value
         return result
 
@@ -107,7 +105,6 @@ class Flow:
             "pay_currency": Currency,
             "amount": Decimal,
             "rate": Decimal,
-            "op_date": date.fromisoformat,
         }
         values = {}
         for field in fields(cls):
@@ -149,7 +146,7 @@ def header(flow: Flow) -> str:
 
 
 def summary(flow: Flow) -> str:
-    """ "Выдал в долг: Азамат · 1 000 USD" for the date and comment steps."""
+    """ "Выдал в долг: Азамат · 1 000 USD" for the comment step."""
     assert flow.amount is not None
     return f"{header(flow)} · {format_money(flow.amount, flow.cash_currency)}"
 
@@ -263,18 +260,6 @@ async def show_rate(
     await show_step(event, state, bot, text, kb.back_only())
 
 
-async def show_date(event: Event, state: FSMContext, bot: Bot, flow: Flow) -> None:
-    await state.set_state(OperationFlow.date)
-    await show_step(event, state, bot, texts.date_step(summary(flow)), kb.dates())
-
-
-async def show_custom_date(
-    event: Event, state: FSMContext, bot: Bot, text: str = texts.ASK_CUSTOM_DATE
-) -> None:
-    await state.set_state(OperationFlow.custom_date)
-    await show_step(event, state, bot, text, kb.back_only())
-
-
 async def show_comment(
     event: Event, state: FSMContext, bot: Bot, flow: Flow, problem: str | None = None
 ) -> None:
@@ -283,10 +268,11 @@ async def show_comment(
     await show_step(event, state, bot, text, kb.skip_or_back(OpAction.SKIP_COMMENT))
 
 
-async def confirmation_text(session: AsyncSession, flow: Flow, terms: OperationTerms) -> str:
-    """The "Проверьте запись" screen with the live balance and cash after saving."""
+async def confirmation_text(
+    session: AsyncSession, flow: Flow, terms: OperationTerms, op_date: date
+) -> str:
+    """The "Проверьте запись" screen: the debt now, then the live balance and cash after saving."""
     assert flow.client_id is not None and flow.debt_currency is not None
-    assert flow.op_date is not None
     client = await clients.get_client(session, flow.client_id)
     balance = await balances.client_balance(session, client.id, flow.debt_currency)
     cash_now = await cash.cash_balance(session, flow.cash_currency)
@@ -303,8 +289,9 @@ async def confirmation_text(session: AsyncSession, flow: Flow, terms: OperationT
             terms.rate_base,
             terms.rate_quote,
         ),
-        op_date=flow.op_date,
+        op_date=op_date,
         comment=flow.comment,
+        balance_before=balance,
         balance_after=balance + terms.debt_delta,
         debt_currency=flow.debt_currency,
         cash_after=cash_now + terms.cash_delta,
@@ -314,9 +301,9 @@ async def confirmation_text(session: AsyncSession, flow: Flow, terms: OperationT
 
 
 async def show_confirm(
-    event: Event, state: FSMContext, bot: Bot, session: AsyncSession, flow: Flow
+    event: Event, state: FSMContext, bot: Bot, session: AsyncSession, flow: Flow, op_date: date
 ) -> None:
-    text = await confirmation_text(session, flow, compute_terms(flow.draft()))
+    text = await confirmation_text(session, flow, compute_terms(flow.draft(op_date)), op_date)
     await state.set_state(OperationFlow.confirm)
     await show_step(event, state, bot, text, kb.confirm())
 
@@ -338,7 +325,7 @@ async def after_amount(
     if flow.other_currency:
         await show_rate(event, state, bot, flow)
     else:
-        await show_date(event, state, bot, flow)
+        await show_comment(event, state, bot, flow)
 
 
 async def go_back(
@@ -365,12 +352,10 @@ async def go_back(
             await show_pay_mode(event, state, bot, flow)
     elif current == OperationFlow.rate.state:
         await show_amount(event, state, bot, session, flow)
-    elif current == OperationFlow.date.state:
+    elif current == OperationFlow.comment.state:
         if flow.other_currency:
             await show_rate(event, state, bot, flow)
         else:
             await show_amount(event, state, bot, session, flow)
-    elif current in (OperationFlow.custom_date.state, OperationFlow.comment.state):
-        await show_date(event, state, bot, flow)
     elif current == OperationFlow.confirm.state:
         await show_comment(event, state, bot, flow)

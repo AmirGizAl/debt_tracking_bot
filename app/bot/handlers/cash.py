@@ -13,6 +13,7 @@ from app.bot import texts
 from app.bot.callbacks import AdjAction, AdjCb, CashAction, CashCb, MenuAction, MenuCb
 from app.bot.keyboards import cash as kb
 from app.bot.keyboards.common import main_menu
+from app.bot.notify import post_adjustment
 from app.bot.states import AdjustmentFlow
 from app.bot.ui import (
     OnScreen,
@@ -245,7 +246,7 @@ async def save(
     assert amount is not None
     chat_id = chat_id_of(callback)
     try:
-        await cash.create_adjustment(
+        adjustment, created = await cash.create_adjustment(
             session,
             user,
             uuid.UUID(data["request_id"]),
@@ -259,6 +260,8 @@ async def save(
         return
     after = await cash.cash_balance(session, currency)
     await finish(bot, state, chat_id, user, texts.adjustment_saved(currency, after))
+    if created:
+        await post_adjustment(bot, settings, session, adjustment.id)
 
 
 @router.callback_query(
