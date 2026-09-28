@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.bot import texts
 from app.bot.keyboards.common import main_menu, panel
-from app.bot.notify import notify_owner
+from app.bot.notify import notify_group, notify_owner
 from app.bot.ui import answer
 from app.config import Settings
 from app.db.models import User
@@ -89,7 +89,9 @@ class AccessMiddleware(BaseMiddleware):
         assert helper.telegram_id is not None
         await bot.send_message(helper.telegram_id, texts.PANEL_GREETING, reply_markup=panel(helper))
         await bot.send_message(helper.telegram_id, texts.MAIN_MENU, reply_markup=main_menu(helper))
-        await notify_owner(bot, self.settings, texts.helper_activated_notice(helper))
+        notice = texts.helper_activated_notice(helper)
+        await notify_owner(bot, self.settings, notice)
+        await notify_group(bot, self.settings, notice)
 
     @staticmethod
     async def _deny(event: TelegramObject, has_username: bool) -> None:

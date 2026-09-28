@@ -9,10 +9,11 @@ from openpyxl import load_workbook
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.bot import texts
+from app.bot.callbacks import RepAction, RepCb
 from app.bot.handlers import reports as handlers
 from app.db.models import User
 from app.domain.currency import Currency
-from app.domain.dates import month_bounds, today
+from app.domain.dates import today
 from app.services import users
 from tests.bot.harness import Harness, UserClient
 from tests.bot.records import TZ
@@ -103,43 +104,66 @@ async def test_debts_report(
     assert ("RUB", "Бекзат", 3000) in rows
 
 
-async def test_records_report_this_month(
+async def test_period_buttons(owner_client: UserClient) -> None:
+    # Customer's request of 28.09.2026: the last N days, no dates to type.
+    await open_report(owner_client, texts.BTN_REPORT_RECORDS)
+
+    assert owner_client.last.text == f"{texts.REPORT_TITLES['records']}\n{texts.ASK_PERIOD}"
+    assert owner_client.last.buttons == [
+        [texts.BTN_PERIOD_TODAY, texts.BTN_PERIOD_WEEK],
+        [texts.BTN_PERIOD_MONTH, texts.BTN_PERIOD_YEAR],
+        [texts.BTN_ALL_TIME],
+        [texts.BTN_BACK, texts.BTN_HOME],
+    ]
+
+
+async def test_records_report_for_today(
     owner_client: UserClient, session: AsyncSession, owner_user: User
 ) -> None:
     await scenarios_1_to_8(session, owner_user)
     await open_report(owner_client, texts.BTN_REPORT_RECORDS)
-    assert owner_client.last.text == f"{texts.REPORT_TITLES['records']}\n{texts.ASK_PERIOD}"
 
-    await owner_client.click(texts.BTN_THIS_MONTH)
-    await owner_client.click(texts.BTN_PDF)
+    await owner_client.click(texts.BTN_PERIOD_TODAY)
+    await owner_client.click(texts.BTN_EXCEL)
 
-    start, end = month_bounds(today(TZ))
+    current = today(TZ)
     name, content = last_document(owner_client)
-    assert name == f"Все_записи_{start.isoformat()}_{end.isoformat()}.pdf"
-    assert content.startswith(b"%PDF")
+    assert name == f"Все_записи_{current.isoformat()}.xlsx"
+    rows = list(load_workbook(BytesIO(content))["Записи"].iter_rows(values_only=True))
+    assert (f"Период: {current:%d.%m.%Y}",) == rows[1][:1]
 
 
-async def test_custom_period(
-    owner_client: UserClient, session: AsyncSession, owner_user: User
+async def test_cash_report_for_a_week(
+    owner_client: UserClient,
+    session: AsyncSession,
+    owner_user: User,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(handlers, "today", lambda zone: date(2026, 9, 27))
     await scenarios_1_to_8(session, owner_user)
     await open_report(owner_client, texts.BTN_REPORT_CASH)
-    await owner_client.click(texts.BTN_CUSTOM_PERIOD)
-    assert owner_client.last.text == texts.ASK_PERIOD_START
 
-    await owner_client.send("31.02.2026")
-    assert owner_client.last.text == texts.INVALID_DATE
-    await owner_client.send("10.09.2026")
-    assert owner_client.last.text == texts.ASK_PERIOD_END
-    await owner_client.send("01.09.2026")
-    assert owner_client.last.text == texts.PERIOD_END_BEFORE_START
-    await owner_client.send("20.09.2026")
+    await owner_client.click(texts.BTN_PERIOD_WEEK)
     await owner_client.click(texts.BTN_EXCEL)
 
     name, content = last_document(owner_client)
-    assert name == "Движение_кассы_2026-09-10_2026-09-20.xlsx"
+    assert name == "Движение_кассы_2026-09-21_2026-09-27.xlsx"
     usd = list(load_workbook(BytesIO(content))["USD"].iter_rows(values_only=True))
-    assert ("Остаток на начало", None, None, None, None, 9000) in usd
+    assert ("Остаток на начало", None, None, None, None, 9400) in usd  # 10.09 is before it
+    assert ("Остаток на конец", None, None, None, None, 9100) in usd  # 300 USD paid on 27.09
+
+
+async def test_period_button_of_the_old_version(owner_client: UserClient) -> None:
+    # A period screen left open while the bot was updated still has the old buttons.
+    await open_report(owner_client, texts.BTN_REPORT_RECORDS)
+    screen = owner_client.last
+
+    popup = await owner_client.press(RepCb(action=RepAction.PERIOD, value="custom").pack(), screen)
+
+    assert popup.text == texts.STALE_ACTION
+    assert owner_client.last.text.endswith(texts.ASK_PERIOD)
+    await owner_client.click(texts.BTN_ALL_TIME)
+    assert owner_client.last.text.endswith(texts.ASK_FORMAT)
 
 
 async def test_statement_from_client_card(
@@ -196,8 +220,10 @@ async def test_helper_can_build_reports(
 @pytest.mark.parametrize(
     ("button", "expected"),
     [
-        (texts.BTN_LAST_MONTH, "Все_записи_2026-08-01_2026-08-31.xlsx"),
-        (texts.BTN_THIS_YEAR, "Все_записи_2026-01-01_{today}.xlsx"),
+        (texts.BTN_PERIOD_TODAY, "Все_записи_{today}.xlsx"),
+        (texts.BTN_PERIOD_WEEK, "Все_записи_2026-09-21_{today}.xlsx"),
+        (texts.BTN_PERIOD_MONTH, "Все_записи_2026-08-29_{today}.xlsx"),
+        (texts.BTN_PERIOD_YEAR, "Все_записи_2025-09-28_{today}.xlsx"),
         (texts.BTN_ALL_TIME, "Все_записи_всё_время.xlsx"),
     ],
 )

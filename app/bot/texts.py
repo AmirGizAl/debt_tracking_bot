@@ -305,16 +305,10 @@ ASK_DEBT_CURRENCY = "Какой долг закрывается?"
 ASK_PAY_CURRENCY = "В какой валюте оплата?"
 BTN_SAME_CURRENCY = "В этой же валюте"
 BTN_OTHER_CURRENCY = "В другой валюте"
-BTN_TODAY = "Сегодня"
-BTN_YESTERDAY = "Вчера"
-BTN_OTHER_DATE = "Другая дата"
 BTN_SAVE = "Сохранить"
 BTN_DONT_SAVE = "Не сохранять"
 BTN_OPEN_RECORD = "Открыть запись"
 
-ASK_CUSTOM_DATE = "Введите дату в формате ДД.ММ.ГГГГ или ДД.ММ (тогда год текущий):"
-INVALID_DATE = "Не получилось распознать дату. Введите её как ДД.ММ.ГГГГ, например 25.09.2026:"
-FUTURE_DATE = "Дата не может быть в будущем. Введите другую дату:"
 ASK_RECORD_COMMENT = "Добавьте комментарий к записи или нажмите «Пропустить»:"
 RECORD_NOT_SAVED = "Запись не сохранена."
 
@@ -449,10 +443,6 @@ def insufficient_cash_not_saved(error: InsufficientCash) -> str:
     return f"{insufficient_cash(error)}\n{RECORD_NOT_SAVED}"
 
 
-def date_step(header: str) -> str:
-    return f"{header}\n\nДата записи?"
-
-
 def warning_text(warning: RepayWarning, currency: Currency) -> str:
     """TZ 7.5."""
     excess = format_money(warning.excess, currency) if warning.excess is not None else ""
@@ -509,6 +499,7 @@ def confirm_record(
     amounts: list[str],
     op_date: date,
     comment: str | None,
+    balance_before: Decimal,
     balance_after: Decimal,
     debt_currency: Currency,
     cash_after: Decimal,
@@ -521,9 +512,13 @@ def confirm_record(
         lines.append(f"Комментарий: {esc(comment)}")
     lines += [
         "",
+        # The debt the record starts from, so it is clear what a repayment closes.
+        "<b>Сейчас:</b>",
+        balance_line(client_name, balance_before, debt_currency),
+        "",
         "<b>После сохранения:</b>",
         balance_line(client_name, balance_after, debt_currency),
-        f"В кассе {cash_currency}: {format_amount(cash_after)}",
+        cash_line(cash_currency, cash_after),
     ]
     if warning is not None:
         lines += ["", f"<b>{warning_text(warning, debt_currency)}</b>"]
@@ -756,6 +751,73 @@ def helper_cancelled_notice(helper: User, operation: Operation, reason: str) -> 
     )
 
 
+# --- Group chat (GROUP_CHAT_ID; customer's request of 28.09.2026) ---------------------------
+
+
+def _made_by(author: User, created_at: datetime, zone: ZoneInfo) -> str:
+    return (
+        f"Автор: {esc(user_name_with_username(author))} · "
+        f"внесено {format_datetime(created_at, zone)}"
+    )
+
+
+def group_record_notice(
+    operation: Operation, balance: Decimal, cash_after: Decimal, zone: ZoneInfo
+) -> str:
+    """A new record or a reversal. `operation.client` and `operation.author` must be loaded."""
+    if operation.reversal_of_id is not None:
+        lines = [
+            f"<b>Новая запись №{operation.id} · Отмена записи №{operation.reversal_of_id}</b>",
+            record_summary(operation),
+            f"Причина: {esc(operation.reversal_reason)}",
+        ]
+        after = "<b>После отмены:</b>"
+    else:
+        lines = [
+            f"<b>Новая запись №{operation.id} · {TYPE_LABEL[operation.type]}</b>",
+            f"Клиент: {esc(operation.client.name)}",
+            *record_amount_lines(operation),
+        ]
+        if operation.comment:
+            lines.append(f"Комментарий: {esc(operation.comment)}")
+        after = "<b>После записи:</b>"
+    lines += [
+        _made_by(operation.author, operation.created_at, zone),
+        "",
+        after,
+        balance_line(operation.client.name, balance, operation.debt_currency),
+        cash_line(operation.cash_currency, cash_after),
+    ]
+    return "\n".join(lines)
+
+
+def group_adjustment_notice(adjustment: CashAdjustment, cash_after: Decimal, zone: ZoneInfo) -> str:
+    """`adjustment.author` must be loaded."""
+    return "\n".join(
+        [
+            f"<b>Корректировка кассы {adjustment.currency}</b>",
+            f"Изменение: {format_signed(adjustment.amount)} {adjustment.currency}",
+            f"Причина: {esc(adjustment.reason)}",
+            _made_by(adjustment.author, adjustment.created_at, zone),
+            "",
+            "<b>После корректировки:</b>",
+            cash_line(adjustment.currency, cash_after),
+        ]
+    )
+
+
+def bot_added_to_group(title: str | None, chat_id: int, connected: bool) -> str:
+    """To the owner, who has just added the bot to a group."""
+    name = f"«{esc(title)}»" if title else str(chat_id)
+    if connected:
+        return f"Бот добавлен в группу {name}. Уведомления о записях будут приходить туда."
+    return (
+        f"Бот добавлен в группу {name}. Чтобы он публиковал туда уведомления о записях, "
+        f"укажите в файле .env строку\n<code>GROUP_CHAT_ID={chat_id}</code>\n"
+        "и перезапустите бота."
+    )
+
+
 # --- Reports (TZ 12.8, 13) ------------------------------------------------------------------
 
 REPORTS_TITLE = "Какой отчёт нужен?"
@@ -764,19 +826,16 @@ BTN_REPORT_DEBTS = "Кто кому должен"
 BTN_REPORT_RECORDS = "Все записи за период"
 BTN_REPORT_CASH = "Движение кассы"
 BTN_REPORT_STATEMENT = "Выписка по клиенту"
-BTN_THIS_MONTH = "Этот месяц"
-BTN_LAST_MONTH = "Прошлый месяц"
-BTN_THIS_YEAR = "С начала года"
+BTN_PERIOD_TODAY = "Сегодня"
+BTN_PERIOD_WEEK = "Неделя"
+BTN_PERIOD_MONTH = "Месяц"
+BTN_PERIOD_YEAR = "Год"
 BTN_ALL_TIME = "Всё время"
-BTN_CUSTOM_PERIOD = "Указать даты"
 BTN_EXCEL = "Excel"
 BTN_PDF = "PDF"
 
 ASK_FORMAT = "В каком виде прислать?"
 ASK_PERIOD = "За какой период?"
-ASK_PERIOD_START = "Введите дату начала периода в формате ДД.ММ.ГГГГ:"
-ASK_PERIOD_END = "Введите дату конца периода в формате ДД.ММ.ГГГГ:"
-PERIOD_END_BEFORE_START = "Конец периода не может быть раньше начала. Введите дату конца ещё раз:"
 RATES_INTRO = "Укажите курсы для пересчёта кассы в сомы."
 STATEMENT_CLIENT_QUESTION = "По какому клиенту нужна выписка?"
 STATEMENT_NO_CLIENTS = "Клиентов пока нет."

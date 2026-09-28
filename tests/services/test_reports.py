@@ -14,7 +14,7 @@ from app.domain.currency import Currency
 from app.domain.operations import OperationType
 from app.services import reports
 from app.services.reports import ReportFormat, ReportKind, data, excel, pdf
-from app.services.reports.data import Period, ReportMeta
+from app.services.reports.data import Period, PeriodPreset, ReportMeta, preset_period
 from tests.bot.harness import readable
 from tests.factories import make_client
 from tests.services.accounting import adjust, record, reverse, scenarios_1_to_8
@@ -336,6 +336,7 @@ def test_pdf_splits_long_tables_into_numbered_pages() -> None:
         (ReportKind.DEBTS, ReportFormat.PDF, None, None, "Кто_кому_должен_2026-09-27.pdf"),
         (ReportKind.RECORDS, ReportFormat.PDF, SEPTEMBER, None, "Все_записи_2026-09-01_2026-09-30.pdf"),
         (ReportKind.CASH, ReportFormat.XLSX, Period(), None, "Движение_кассы_всё_время.xlsx"),
+        (ReportKind.RECORDS, ReportFormat.XLSX, Period(date(2026, 9, 27), date(2026, 9, 27)), None, "Все_записи_2026-09-27.xlsx"),
         (ReportKind.STATEMENT, ReportFormat.PDF, SEPTEMBER, "Иван (Ош)", "Выписка_Иван_(Ош)_2026-09-01_2026-09-30.pdf"),
         (ReportKind.STATEMENT, ReportFormat.XLSX, SEPTEMBER, "a/b\\\\c", "Выписка_a_b_c_2026-09-01_2026-09-30.xlsx"),
     ],
@@ -344,3 +345,24 @@ def test_file_names(
     kind: ReportKind, fmt: ReportFormat, period: Period | None, client: str | None, expected: str
 ) -> None:
     assert reports.file_name(kind, fmt, NOW, period, client) == expected
+
+
+@pytest.mark.parametrize(
+    ("preset", "expected"),
+    [
+        (PeriodPreset.TODAY, Period(date(2026, 9, 27), date(2026, 9, 27))),
+        (PeriodPreset.WEEK, Period(date(2026, 9, 21), date(2026, 9, 27))),
+        (PeriodPreset.MONTH, Period(date(2026, 8, 29), date(2026, 9, 27))),
+        (PeriodPreset.YEAR, Period(date(2025, 9, 28), date(2026, 9, 27))),
+        (PeriodPreset.ALL, Period()),
+    ],
+)
+def test_period_presets_are_the_last_days(preset: PeriodPreset, expected: Period) -> None:
+    # Agreed on 28.09.2026: "Неделя", "Месяц", "Год" are the last 7, 30, 365 days.
+    assert preset_period(preset, date(2026, 9, 27)) == expected
+
+
+def test_period_labels() -> None:
+    assert Period().label == "всё время"
+    assert Period(date(2026, 9, 27), date(2026, 9, 27)).label == "27.09.2026"
+    assert SEPTEMBER.label == "01.09.2026 – 30.09.2026"

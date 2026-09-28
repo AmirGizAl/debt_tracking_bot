@@ -8,6 +8,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
+from enum import StrEnum
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,7 +17,7 @@ from sqlalchemy.orm import aliased, joinedload
 from app.bot import texts
 from app.db.models import CashAdjustment, Client, Operation
 from app.domain.currency import CURRENCIES, HOME_CURRENCY, Currency
-from app.domain.dates import format_date
+from app.domain.dates import format_date, last_days
 from app.domain.money import format_money, quantize_money
 from app.services import cash
 
@@ -34,6 +35,8 @@ class Period:
     def label(self) -> str:
         if self.start is None and self.end is None:
             return texts.REPORT_ALL_TIME
+        if self.start is not None and self.start == self.end:
+            return format_date(self.start)
         start = format_date(self.start) if self.start else "…"
         end = format_date(self.end) if self.end else "…"
         return f"{start} – {end}"
@@ -42,6 +45,8 @@ class Period:
     def file_part(self) -> str:
         if self.start is None and self.end is None:
             return texts.REPORT_FILE_ALL_TIME
+        if self.start is not None and self.start == self.end:
+            return self.start.isoformat()
         start = self.start.isoformat() if self.start else texts.REPORT_FILE_OPEN_START
         end = self.end.isoformat() if self.end else texts.REPORT_FILE_OPEN_END
         return f"{start}_{end}"
@@ -51,6 +56,32 @@ class Period:
 
     def before(self, day: date) -> bool:
         return self.start is not None and day < self.start
+
+
+class PeriodPreset(StrEnum):
+    """Period buttons of the reports: the last N days up to today (agreed on 28.09.2026)."""
+
+    TODAY = "today"
+    WEEK = "week"
+    MONTH = "month"
+    YEAR = "year"
+    ALL = "all"
+
+
+PRESET_DAYS = {
+    PeriodPreset.TODAY: 1,
+    PeriodPreset.WEEK: 7,
+    PeriodPreset.MONTH: 30,
+    PeriodPreset.YEAR: 365,
+}
+
+
+def preset_period(preset: PeriodPreset, current: date) -> Period:
+    """ "Неделя" on 28.09.2026 is 22.09.2026 – 28.09.2026; "Всё время" has no bounds."""
+    days = PRESET_DAYS.get(preset)
+    if days is None:
+        return Period()
+    return Period(*last_days(current, days))
 
 
 @dataclass(frozen=True)

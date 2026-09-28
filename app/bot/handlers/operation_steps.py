@@ -16,12 +16,13 @@ from app.bot.flows import operation
 from app.bot.flows.operation import Event, Flow
 from app.bot.keyboards import operations as kb
 from app.bot.keyboards.common import main_menu
+from app.bot.notify import post_record
 from app.bot.states import OperationFlow
 from app.bot.ui import OnScreen, answer, chat_id_of, edit_or_send, finish
 from app.config import Settings
 from app.db.models import User
 from app.domain import errors
-from app.domain.dates import parse_date, today, yesterday
+from app.domain.dates import today
 from app.domain.money import parse_amount
 from app.domain.operations import takes_cash
 from app.services import cash, clients, operations
@@ -216,65 +217,24 @@ async def receive_amount(
     await operation.after_amount(message, state, bot, session, flow)
 
 
-# --- date (TZ 7.6) -----------------------------------------------------------------------------
-
-
-@router.callback_query(
-    OperationFlow.date, OpCb.filter(F.action.in_({OpAction.TODAY, OpAction.YESTERDAY})), OnScreen()
-)
-async def quick_date(
-    callback: CallbackQuery,
-    callback_data: OpCb,
-    state: FSMContext,
-    bot: Bot,
-    user: User,
-    settings: Settings,
-) -> None:
-    flow = await _flow(callback, state, bot, user)
-    if flow is None:
-        return
-    current = today(settings.zone)
-    flow.op_date = current if callback_data.action == OpAction.TODAY else yesterday(current)
-    await operation.store(state, flow)
-    await operation.show_comment(callback, state, bot, flow)
-    await answer(callback)
-
-
-@router.callback_query(OperationFlow.date, _step(OpAction.OTHER_DATE), OnScreen())
-async def ask_custom_date(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None:
-    await operation.show_custom_date(callback, state, bot)
-    await answer(callback)
-
-
-@router.message(OperationFlow.custom_date, F.text)
-async def receive_custom_date(
-    message: Message, state: FSMContext, bot: Bot, user: User, settings: Settings
-) -> None:
-    assert message.text is not None
-    flow = await _flow(message, state, bot, user)
-    if flow is None:
-        return
-    try:
-        flow.op_date = parse_date(message.text, today(settings.zone))
-    except errors.FutureDate:
-        await operation.show_custom_date(message, state, bot, texts.FUTURE_DATE)
-        return
-    except errors.InvalidDate:
-        await operation.show_custom_date(message, state, bot, texts.INVALID_DATE)
-        return
-    await operation.store(state, flow)
-    await operation.show_comment(message, state, bot, flow)
-
-
 # --- comment and confirmation ------------------------------------------------------------------
+# A record is always dated today in the TZ time zone: the date step was removed at the
+# customer's request (28.09.2026). The date is taken again when saving, so a confirmation left
+# open over midnight saves the record with the new day.
 
 
 async def _confirm(
-    event: Event, state: FSMContext, bot: Bot, session: AsyncSession, user: User, flow: Flow
+    event: Event,
+    state: FSMContext,
+    bot: Bot,
+    session: AsyncSession,
+    user: User,
+    settings: Settings,
+    flow: Flow,
 ) -> None:
     await operation.store(state, flow)
     try:
-        await operation.show_confirm(event, state, bot, session, flow)
+        await operation.show_confirm(event, state, bot, session, flow, today(settings.zone))
     except errors.ClientNotFound:
         await finish(
             bot,
@@ -287,7 +247,12 @@ async def _confirm(
 
 @router.message(OperationFlow.comment, F.text)
 async def receive_comment(
-    message: Message, state: FSMContext, bot: Bot, session: AsyncSession, user: User
+    message: Message,
+    state: FSMContext,
+    bot: Bot,
+    session: AsyncSession,
+    user: User,
+    settings: Settings,
 ) -> None:
     assert message.text is not None
     flow = await _flow(message, state, bot, user)
@@ -298,32 +263,43 @@ async def receive_comment(
     except errors.TextTooLong as error:
         await operation.show_comment(message, state, bot, flow, texts.comment_too_long(error.limit))
         return
-    await _confirm(message, state, bot, session, user, flow)
+    await _confirm(message, state, bot, session, user, settings, flow)
 
 
 @router.callback_query(OperationFlow.comment, _step(OpAction.SKIP_COMMENT), OnScreen())
 async def skip_comment(
-    callback: CallbackQuery, state: FSMContext, bot: Bot, session: AsyncSession, user: User
+    callback: CallbackQuery,
+    state: FSMContext,
+    bot: Bot,
+    session: AsyncSession,
+    user: User,
+    settings: Settings,
 ) -> None:
     flow = await _flow(callback, state, bot, user)
     if flow is None:
         return
     flow.comment = None
-    await _confirm(callback, state, bot, session, user, flow)
+    await _confirm(callback, state, bot, session, user, settings, flow)
     await answer(callback)
 
 
 @router.callback_query(OperationFlow.confirm, _step(OpAction.SAVE), OnScreen())
 async def save(
-    callback: CallbackQuery, state: FSMContext, bot: Bot, session: AsyncSession, user: User
+    callback: CallbackQuery,
+    state: FSMContext,
+    bot: Bot,
+    session: AsyncSession,
+    user: User,
+    settings: Settings,
 ) -> None:
     flow = await _flow(callback, state, bot, user)
     if flow is None:
         return
     await answer(callback)
     chat_id = chat_id_of(callback)
+    draft = flow.draft(today(settings.zone))
     try:
-        record, _created = await operations.create_operation(session, user, flow.draft())
+        record, created = await operations.create_operation(session, user, draft)
     except errors.InsufficientCash as error:
         await finish(bot, state, chat_id, user, texts.insufficient_cash_not_saved(error))
         return
@@ -335,6 +311,8 @@ async def save(
     await finish(
         bot, state, chat_id, user, texts.record_saved(record.id), kb.open_record(record.id)
     )
+    if created:
+        await post_record(bot, settings, session, record.id)
 
 
 @router.callback_query(OperationFlow.confirm, _step(OpAction.DONT_SAVE), OnScreen())

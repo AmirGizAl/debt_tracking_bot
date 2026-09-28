@@ -1,4 +1,7 @@
-"""«Выдал в долг» and «Взял в долг» (TZ 12.3): client -> currency -> amount -> date -> comment."""
+"""«Выдал в долг» and «Взял в долг» (TZ 12.3): client -> currency -> amount -> comment.
+
+The record is dated today: the date step was removed at the customer's request (28.09.2026).
+"""
 
 from aiogram import Bot, F, Router
 from aiogram.fsm.context import FSMContext

@@ -6,7 +6,13 @@ from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from app.bot.dispatcher import create_bot, create_dispatcher, create_storage, prepare_bot
+from app.bot.dispatcher import (
+    check_group,
+    create_bot,
+    create_dispatcher,
+    create_storage,
+    prepare_bot,
+)
 from app.config import Settings
 from app.db.session import create_engine, create_sessionmaker
 from app.logging import setup_logging
@@ -40,6 +46,7 @@ async def run() -> None:
             await users.ensure_owner(session, settings.owner_telegram_id)
         dispatcher = create_dispatcher(settings, sessionmaker, create_storage(settings))
         await prepare_bot(bot)
+        await check_group(bot, settings)
         logger.info("Bot started, owner telegram_id=%s", settings.owner_telegram_id)
         await dispatcher.start_polling(
             bot,

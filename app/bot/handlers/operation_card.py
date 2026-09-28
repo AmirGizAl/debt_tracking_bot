@@ -11,7 +11,7 @@ from app.bot import texts
 from app.bot.callbacks import RecordAction, RecordCb, RevAction, RevCb
 from app.bot.keyboards import operations as operations_kb
 from app.bot.keyboards import records as kb
-from app.bot.notify import notify_owner
+from app.bot.notify import notify_owner, post_record
 from app.bot.states import ReversalFlow
 from app.bot.ui import OnScreen, answer, chat_id_of, edit_or_send, finish, leave_scenario, show_step
 from app.config import Settings
@@ -149,7 +149,7 @@ async def confirm_reversal(
     chat_id = chat_id_of(callback)
     operation_id = data["operation_id"]
     try:
-        _reversal, created = await operations.reverse_operation(
+        reversal, created = await operations.reverse_operation(
             session,
             user,
             uuid.UUID(data["request_id"]),
@@ -174,13 +174,6 @@ async def confirm_reversal(
         return
 
     operation = await operations.get_operation(session, operation_id)
-    if created and not user.is_owner:
-        await notify_owner(
-            bot,
-            settings,
-            texts.helper_cancelled_notice(user, operation, data["reason"]),
-            operations_kb.open_record(operation.id),
-        )
     balance = await balances.client_balance(session, operation.client_id, operation.debt_currency)
     await finish(
         bot,
@@ -191,3 +184,13 @@ async def confirm_reversal(
             operation.id, operation.client.name, balance, operation.debt_currency
         ),
     )
+    if not created:
+        return  # a repeated "Да, отменить": everybody has been told already
+    if not user.is_owner:
+        await notify_owner(
+            bot,
+            settings,
+            texts.helper_cancelled_notice(user, operation, data["reason"]),
+            operations_kb.open_record(operation.id),
+        )
+    await post_record(bot, settings, session, reversal.id)

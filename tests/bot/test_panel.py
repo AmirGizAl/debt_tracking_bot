@@ -113,7 +113,6 @@ async def test_record_started_from_the_panel_is_saved(
     await owner_client.click(texts.BTN_SKIP)
     await owner_client.click("RUB")
     await owner_client.send("50 000")
-    await owner_client.click(texts.BTN_TODAY)
     await owner_client.click(texts.BTN_SKIP)
 
     assert await save(owner_client) == "Запись №1 сохранена."
