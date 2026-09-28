@@ -21,9 +21,10 @@ from app.bot.ui import (
     OnScreen,
     answer,
     chat_id_of,
-    edit_or_send,
+    leave_any,
     leave_scenario,
     reset_scenario,
+    show_screen,
     show_step,
 )
 from app.config import Settings
@@ -52,9 +53,9 @@ def _title(data: dict[str, Any]) -> str:
 # --- screens -----------------------------------------------------------------------------------
 
 
-async def _show_menu(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None:
-    await leave_scenario(callback, state, bot)
-    await edit_or_send(bot, callback.message, texts.REPORTS_TITLE, kb.report_menu())
+async def show_reports_menu(event: Event, state: FSMContext, bot: Bot) -> None:
+    await leave_any(event, state, bot)
+    await show_screen(event, bot, texts.REPORTS_TITLE, kb.report_menu())
 
 
 async def _ask_next_rate(
@@ -144,7 +145,7 @@ async def _start(
 
 @router.callback_query(MenuCb.filter(F.action == MenuAction.REPORTS))
 async def open_reports(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None:
-    await _show_menu(callback, state, bot)
+    await show_reports_menu(callback, state, bot)
     await answer(callback)
 
 
@@ -406,5 +407,5 @@ async def back(callback: CallbackQuery, state: FSMContext, bot: Bot, session: As
     elif current == ReportFlow.format.state and kind in PERIOD_KINDS:
         await _show_period(callback, state, bot)
     else:
-        await _show_menu(callback, state, bot)
+        await show_reports_menu(callback, state, bot)
     await answer(callback)

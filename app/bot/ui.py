@@ -171,3 +171,25 @@ class FlowOf(Filter):
 
     async def __call__(self, event: TelegramObject, state: FSMContext) -> bool:
         return (await state.get_data()).get("op_type") in self.op_types
+
+
+async def leave_any(event: Message | CallbackQuery, state: FSMContext, bot: Bot) -> None:
+    """Abandon any scenario before opening a section (from a button or from the panel)."""
+    if isinstance(event, CallbackQuery):
+        await leave_scenario(event, state, bot)
+    else:
+        await reset_scenario(state, bot, event.chat.id)
+
+
+async def show_screen(
+    event: Message | CallbackQuery,
+    bot: Bot,
+    text: str,
+    reply_markup: InlineKeyboardMarkup | None = None,
+) -> None:
+    """A plain screen: edits the pressed message, or comes as a new one after a panel tap."""
+    if isinstance(event, CallbackQuery):
+        if event.message is not None:
+            await edit_or_send(bot, event.message, text, reply_markup)
+    else:
+        await bot.send_message(event.chat.id, text, reply_markup=reply_markup)

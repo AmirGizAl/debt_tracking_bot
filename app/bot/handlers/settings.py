@@ -10,7 +10,16 @@ from app.bot import texts
 from app.bot.callbacks import MenuAction, MenuCb, SettingsAction, SettingsCb
 from app.bot.keyboards import settings as kb
 from app.bot.states import HelperFlow
-from app.bot.ui import answer, drop_keyboard, edit_or_send, finish, leave_scenario, show_step
+from app.bot.ui import (
+    answer,
+    drop_keyboard,
+    edit_or_send,
+    finish,
+    leave_any,
+    leave_scenario,
+    show_screen,
+    show_step,
+)
 from app.config import Settings
 from app.db.models import User
 from app.domain import errors
@@ -26,13 +35,18 @@ async def _owner_only(callback: CallbackQuery, user: User) -> bool:
     return False
 
 
+async def show_settings(event: Message | CallbackQuery, state: FSMContext, bot: Bot) -> None:
+    """Owner only: callers check the role first."""
+    await leave_any(event, state, bot)
+    await show_screen(event, bot, texts.SETTINGS_TITLE, kb.settings_menu())
+
+
 @router.callback_query(MenuCb.filter(F.action == MenuAction.SETTINGS))
 @router.callback_query(SettingsCb.filter(F.action == SettingsAction.HOME))
 async def open_settings(callback: CallbackQuery, state: FSMContext, bot: Bot, user: User) -> None:
     if not await _owner_only(callback, user):
         return
-    await leave_scenario(callback, state, bot)
-    await edit_or_send(bot, callback.message, texts.SETTINGS_TITLE, kb.settings_menu())
+    await show_settings(callback, state, bot)
     await answer(callback)
 
 

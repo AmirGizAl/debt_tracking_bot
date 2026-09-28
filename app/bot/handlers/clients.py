@@ -17,7 +17,9 @@ from app.bot.ui import (
     drop_keyboard,
     edit_or_send,
     finish,
+    leave_any,
     leave_scenario,
+    show_screen,
     show_step,
 )
 from app.db.models import Client, User
@@ -48,21 +50,25 @@ def _name_error(error: errors.InvalidClientName) -> str:
 # --- list and card -----------------------------------------------------------------------------
 
 
-async def _show_list(
-    callback: CallbackQuery, state: FSMContext, bot: Bot, session: AsyncSession, number: int
+async def show_clients(
+    event: Message | CallbackQuery,
+    state: FSMContext,
+    bot: Bot,
+    session: AsyncSession,
+    number: int = 0,
 ) -> None:
-    await leave_scenario(callback, state, bot)
+    await leave_any(event, state, bot)
     page = await clients.list_clients(session, number)
     text = texts.CLIENTS_TITLE if page.total else f"{texts.CLIENTS_TITLE}\n{texts.CLIENTS_EMPTY}"
-    await edit_or_send(bot, callback.message, text, kb.clients_list(page))
-    await answer(callback)
+    await show_screen(event, bot, text, kb.clients_list(page))
 
 
 @router.callback_query(MenuCb.filter(F.action == MenuAction.CLIENTS))
 async def open_clients(
     callback: CallbackQuery, state: FSMContext, bot: Bot, session: AsyncSession
 ) -> None:
-    await _show_list(callback, state, bot, session, 0)
+    await show_clients(callback, state, bot, session)
+    await answer(callback)
 
 
 @router.callback_query(_action(ClientsAction.LIST))
@@ -73,7 +79,8 @@ async def clients_page(
     bot: Bot,
     session: AsyncSession,
 ) -> None:
-    await _show_list(callback, state, bot, session, callback_data.page)
+    await show_clients(callback, state, bot, session, callback_data.page)
+    await answer(callback)
 
 
 async def render_card(

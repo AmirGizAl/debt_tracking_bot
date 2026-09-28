@@ -43,6 +43,8 @@ from aiogram.types import (
     Document,
     InlineKeyboardMarkup,
     Message,
+    ReplyKeyboardMarkup,
+    ReplyKeyboardRemove,
     TelegramObject,
     Update,
 )
@@ -119,6 +121,7 @@ class FakeMessage:
     markup: InlineKeyboardMarkup | None = None
     document_name: str | None = None
     document_data: bytes | None = None
+    panel: ReplyKeyboardMarkup | None = None  # reply keyboard sent with this message
 
     @property
     def text(self) -> str:
@@ -167,6 +170,8 @@ class FakeTelegram(BaseSession):
         # The message a user is looking at: the newest sent one or the one whose text was
         # just edited (removing buttons alone does not count).
         self.last_shown: dict[int, FakeMessage] = {}
+        # The reply keyboard a chat shows under the input field (it outlives its message).
+        self.panels: dict[int, ReplyKeyboardMarkup | None] = {}
         self._message_ids: dict[int, itertools.count[int]] = defaultdict(lambda: itertools.count(1))
 
     def next_message_id(self, chat_id: int) -> int:
@@ -218,6 +223,7 @@ class FakeTelegram(BaseSession):
 
     @staticmethod
     def _check_markup(method: TelegramMethod[Any], markup: Any) -> InlineKeyboardMarkup | None:
+        """Inline keyboard of a message (the only kind an edit may carry)."""
         if markup is None:
             return None
         assert isinstance(markup, InlineKeyboardMarkup), f"unexpected markup {markup!r}"
@@ -229,6 +235,13 @@ class FakeTelegram(BaseSession):
                 if not button.text.strip():
                     raise TelegramBadRequest(method, "Bad Request: empty button text")
         return markup
+
+    @staticmethod
+    def _check_panel(method: TelegramMethod[Any], markup: ReplyKeyboardMarkup) -> None:
+        for row in markup.keyboard:
+            for button in row:
+                if not button.text.strip():
+                    raise TelegramBadRequest(method, "Bad Request: empty button text")
 
     def _existing(self, method: TelegramMethod[Any], chat_id: Any, message_id: Any) -> FakeMessage:
         message = self.messages.get((int(chat_id), int(message_id)))
@@ -245,7 +258,16 @@ class FakeTelegram(BaseSession):
     def _do_SendMessage(self, method: SendMessage) -> Message:
         chat_id = self._check_chat(method, method.chat_id)
         self._check_text(method, method.text)
-        markup = self._check_markup(method, method.reply_markup)
+        panel = None
+        if isinstance(method.reply_markup, ReplyKeyboardMarkup):
+            self._check_panel(method, method.reply_markup)
+            panel = self.panels[chat_id] = method.reply_markup
+            markup = None
+        elif isinstance(method.reply_markup, ReplyKeyboardRemove):
+            self.panels[chat_id] = None
+            markup = None
+        else:
+            markup = self._check_markup(method, method.reply_markup)
         message = self.add(
             FakeMessage(
                 chat_id=chat_id,
@@ -253,6 +275,7 @@ class FakeTelegram(BaseSession):
                 from_bot=True,
                 html=method.text,
                 markup=markup,
+                panel=panel,
             )
         )
         return self._as_telegram(message)
@@ -446,6 +469,25 @@ class UserClient:
 
     def since(self, mark: int) -> list[FakeMessage]:
         return [m for m in self.telegram.history[self.chat_id][mark:] if m.from_bot]
+
+    @property
+    def panel_markup(self) -> ReplyKeyboardMarkup | None:
+        return self.telegram.panels.get(self.chat_id)
+
+    @property
+    def panel(self) -> list[list[str]]:
+        """Rows of the section panel under the input field (empty if there is none)."""
+        markup = self.panel_markup
+        if markup is None:
+            return []
+        return [[readable(button.text) for button in row] for row in markup.keyboard]
+
+    async def tap(self, button_text: str) -> None:
+        """Tap a panel button: Telegram sends its text as a message."""
+        assert any(button_text in row for row in self.panel), (
+            f"no panel button {button_text!r} in {self.panel}"
+        )
+        await self.send(button_text)
 
     def message_with_button(self, button_text: str) -> FakeMessage:
         for message in reversed(self.bot_messages):

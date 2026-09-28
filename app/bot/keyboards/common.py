@@ -2,7 +2,12 @@ from collections.abc import Callable
 from typing import Any
 
 from aiogram.filters.callback_data import CallbackData
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    KeyboardButton,
+    ReplyKeyboardMarkup,
+)
 
 from app.bot import texts
 from app.bot.callbacks import MenuAction, MenuCb, NoopCb
@@ -37,6 +42,27 @@ def main_menu(user: User) -> InlineKeyboardMarkup:
         ],
         [item(texts.BTN_CLIENTS, MenuAction.CLIENTS), item(texts.BTN_CASH, MenuAction.CASH)],
         last_row,
+    )
+
+
+def panel(user: User) -> ReplyKeyboardMarkup:
+    """Section panel under the input field, always shown; same layout as the main menu."""
+
+    def item(text: str) -> KeyboardButton:
+        return KeyboardButton(text=text)
+
+    last_row = [item(texts.BTN_REPORTS)]
+    if user.is_owner:
+        last_row.append(item(texts.BTN_SETTINGS))
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [item(texts.BTN_LEND), item(texts.BTN_REPAY_IN)],
+            [item(texts.BTN_BORROW), item(texts.BTN_REPAY_OUT)],
+            [item(texts.BTN_CLIENTS), item(texts.BTN_CASH)],
+            last_row,
+        ],
+        resize_keyboard=True,
+        is_persistent=True,
     )
 
 
