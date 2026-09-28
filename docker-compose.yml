@@ -43,6 +43,18 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      hysteria:
+        condition: service_started
+    logging: *default-logging
+
+  # Hysteria2 client: a SOCKS5 proxy to Telegram for running inside Russia.
+  # The bot reaches it as socks5://hysteria:1080 (PROXY_URL in .env); not published outside.
+  hysteria:
+    image: tobyxdd/hysteria:latest
+    restart: unless-stopped
+    command: ["client", "-c", "/etc/hysteria/config.yaml"]
+    volumes:
+      - ./hysteria/config.yaml:/etc/hysteria/config.yaml:ro
     logging: *default-logging
 
 volumes:

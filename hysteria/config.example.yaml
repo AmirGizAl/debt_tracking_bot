@@ -1,0 +1,16 @@
+# Hysteria2 client config for the "hysteria" service in docker-compose.yml (ru_version).
+# Copy to config.yaml (gitignored: it holds the password) and fill in values from your link:
+#   hysteria2://AUTH@SERVER:PORT?insecure=1#name
+#   -> server: SERVER:PORT, auth: AUTH, tls.insecure: true (only if insecure=1 is present)
+
+server: your-server-host:443
+
+auth: your-auth-string
+
+tls:
+  insecure: false
+
+# Listen on all interfaces inside the container: the bot connects to hysteria:1080.
+# The port is not published outside the Docker network.
+socks5:
+  listen: 0.0.0.0:1080

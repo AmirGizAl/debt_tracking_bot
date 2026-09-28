@@ -58,12 +58,14 @@ cp .env.example .env
 | `REDIS_URL` | оставьте как есть; если пусто, состояния диалогов живут только в памяти и теряются при перезапуске |
 | `TZ` | часовой пояс для дат записей и отчётов, по умолчанию `Asia/Bishkek` |
 | `LOG_LEVEL` | `INFO` (или `DEBUG` для подробных логов) |
-| `PROXY_URL` | обычно пусто; нужен, только если Telegram заблокирован (раздел 8) |
+| `PROXY_URL` | оставьте `socks5://hysteria:1080`: прокси-клиент Hysteria2 (раздел 8) |
 
 Владелец в боте всегда один: тот, чей ID указан в `OWNER_TELEGRAM_ID`. Если заменить ID на другой
 аккаунт, прежний владелец потеряет доступ, а его записи останутся с пометкой «(удалён)».
 
 ## 4. Запуск
+
+Сначала настройте прокси Hysteria2 (раздел 8), затем:
 
 ```bash
 docker compose up -d --build
@@ -130,25 +132,33 @@ docker compose exec -T db pg_restore -U debtbot -d debtbot --clean --if-exists <
 docker compose start bot
 ```
 
-## 8. Если Telegram недоступен
+## 8. Прокси Hysteria2
 
-Если в логах бота повторяется `Telegram is unreachable` или `Request timeout error`, провайдер
-блокирует `api.telegram.org`. Проверка с сервера:
+В этой ветке (`ru_version`) бот ходит в Telegram через клиент Hysteria2: отдельный контейнер
+`hysteria` в `docker-compose.yml`. Он открывает SOCKS5-прокси внутри сети Docker (наружу порт не
+публикуется), бот подключается к нему по адресу `socks5://hysteria:1080`.
 
-```bash
-curl -m 8 -o /dev/null -w "HTTP %{http_code}\n" https://api.telegram.org
-```
+Перед первым запуском:
 
-Тогда укажите в `.env` прокси, через который Telegram доступен (HTTP или SOCKS5):
+1. Скопируйте пример конфига:
 
-```
-PROXY_URL=socks5://user:password@proxy-host:1080
-```
+   ```bash
+   cp hysteria/config.example.yaml hysteria/config.yaml
+   ```
 
-и перезапустите: `docker compose up -d --build`.
+2. Заполните `hysteria/config.yaml` по ссылке вида `hysteria2://ПАРОЛЬ@СЕРВЕР:ПОРТ?insecure=1#имя`:
+   `server: СЕРВЕР:ПОРТ`, `auth: ПАРОЛЬ`, `tls.insecure: true` (только если в ссылке было
+   `insecure=1`). Строку `listen: 0.0.0.0:1080` не меняйте.
+3. В `.env` оставьте `PROXY_URL=socks5://hysteria:1080`.
+4. Запустите: `docker compose up -d --build`.
 
-Если прокси — сервер Hysteria2, используйте ветку `ru_version`: в ней клиент Hysteria2 уже
-подключён в `docker-compose.yml`, настройка описана в её README.
+Файл `hysteria/config.yaml` содержит пароль и не попадает в git. Если запустить стек без этого
+файла, Docker создаст на его месте папку и клиент не запустится: удалите папку и создайте файл
+по шагам выше.
+
+Проверка: `docker compose logs hysteria` показывает подключение к серверу, а в логах бота
+(`docker compose logs bot`) появляется `Bot started`. Если бот пишет `Telegram is unreachable`,
+значит прокси не работает: проверьте `hysteria/config.yaml`.
 
 ## 9. Для разработчика
 
