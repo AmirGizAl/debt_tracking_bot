@@ -20,7 +20,7 @@ from app.bot import texts
 from app.bot.callbacks import OpAction
 from app.bot.keyboards import operations as kb
 from app.bot.states import OperationFlow
-from app.bot.ui import show_step
+from app.bot.ui import leave_any, show_step
 from app.domain.currency import Currency
 from app.domain.money import format_money
 from app.domain.operations import (
@@ -132,6 +132,15 @@ async def start(state: FSMContext, op_type: OperationType) -> Flow:
     flow = Flow(op_type=op_type, request_id=str(uuid.uuid4()))
     await state.set_data(flow.dump())
     return flow
+
+
+async def begin(
+    event: Event, state: FSMContext, bot: Bot, session: AsyncSession, op_type: OperationType
+) -> None:
+    """Open a record scenario from the main menu or from the panel."""
+    await leave_any(event, state, bot)
+    flow = await start(state, op_type)
+    await show_client_step(event, state, bot, session, flow)
 
 
 def header(flow: Flow) -> str:

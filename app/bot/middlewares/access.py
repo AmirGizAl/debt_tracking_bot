@@ -10,7 +10,7 @@ from aiogram.types import User as TgUser
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.bot import texts
-from app.bot.keyboards.common import main_menu
+from app.bot.keyboards.common import main_menu, panel
 from app.bot.notify import notify_owner
 from app.bot.ui import answer
 from app.config import Settings
@@ -87,6 +87,7 @@ class AccessMiddleware(BaseMiddleware):
         if isinstance(event, CallbackQuery):
             await answer(event)
         assert helper.telegram_id is not None
+        await bot.send_message(helper.telegram_id, texts.PANEL_GREETING, reply_markup=panel(helper))
         await bot.send_message(helper.telegram_id, texts.MAIN_MENU, reply_markup=main_menu(helper))
         await notify_owner(bot, self.settings, texts.helper_activated_notice(helper))
 

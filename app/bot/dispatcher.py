@@ -22,6 +22,7 @@ from app.bot.handlers import (
     menu,
     operation_card,
     operation_steps,
+    panel,
     repay,
     reports,
     start,
@@ -79,6 +80,8 @@ def create_dispatcher(
         # Commands first: /menu and /cancel must win over any step that waits for text.
         start.router,
         menu.router,
+        # The section panel sends plain texts: they must win over steps that wait for text.
+        panel.router,
         settings_handlers.router,
         clients.router,
         lend_borrow.router,

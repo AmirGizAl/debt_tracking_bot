@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.bot.callbacks import MenuAction, MenuCb, OpAction, OpCb
 from app.bot.flows import operation
 from app.bot.states import OperationFlow
-from app.bot.ui import FlowOf, OnScreen, answer, leave_scenario
+from app.bot.ui import FlowOf, OnScreen, answer
 from app.domain.currency import Currency
 from app.domain.operations import NEW_DEBT_TYPES, OperationType
 
@@ -25,9 +25,7 @@ async def start(
     bot: Bot,
     session: AsyncSession,
 ) -> None:
-    await leave_scenario(callback, state, bot)
-    flow = await operation.start(state, ENTRIES[callback_data.action])
-    await operation.show_client_step(callback, state, bot, session, flow)
+    await operation.begin(callback, state, bot, session, ENTRIES[callback_data.action])
     await answer(callback)
 
 

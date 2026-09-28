@@ -20,7 +20,9 @@ from app.bot.ui import (
     chat_id_of,
     edit_or_send,
     finish,
+    leave_any,
     leave_scenario,
+    show_screen,
     show_step,
 )
 from app.config import Settings
@@ -39,27 +41,21 @@ Event = Message | CallbackQuery
 # --- screens -----------------------------------------------------------------------------------
 
 
-async def _show_cash(
-    callback: CallbackQuery, state: FSMContext, bot: Bot, session: AsyncSession, user: User
+async def show_cash(
+    event: Event, state: FSMContext, bot: Bot, session: AsyncSession, user: User
 ) -> None:
-    await leave_scenario(callback, state, bot)
+    await leave_any(event, state, bot)
     balances = await cash.cash_balances(session)
-    await edit_or_send(bot, callback.message, texts.cash_screen(balances), kb.cash_screen(user))
-    await answer(callback)
+    await show_screen(event, bot, texts.cash_screen(balances), kb.cash_screen(user))
 
 
 @router.callback_query(MenuCb.filter(F.action == MenuAction.CASH))
+@router.callback_query(CashCb.filter(F.action == CashAction.SHOW))
 async def open_cash(
     callback: CallbackQuery, state: FSMContext, bot: Bot, session: AsyncSession, user: User
 ) -> None:
-    await _show_cash(callback, state, bot, session, user)
-
-
-@router.callback_query(CashCb.filter(F.action == CashAction.SHOW))
-async def back_to_cash(
-    callback: CallbackQuery, state: FSMContext, bot: Bot, session: AsyncSession, user: User
-) -> None:
-    await _show_cash(callback, state, bot, session, user)
+    await show_cash(callback, state, bot, session, user)
+    await answer(callback)
 
 
 @router.callback_query(CashCb.filter(F.action == CashAction.MOVEMENTS))
