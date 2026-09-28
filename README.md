@@ -6,6 +6,8 @@
 
 - Полная спецификация: [TZ.md](TZ.md).
 - Описание для заказчика с примерами экранов: [docs/client_description.pdf](docs/client_description.pdf).
+- Инструкция по работе для владельца и помощников: [docs/user_guide.pdf](docs/user_guide.pdf).
+  После изменений, которые видят пользователи, пересоберите её: `python docs/build_user_guide.py`.
 - Решения по местам, которые ТЗ не описывает: [docs/decisions.md](docs/decisions.md).
 
 Для работы нужен сервер (или компьютер) с Docker и Docker Compose v2. Всё остальное запускается
