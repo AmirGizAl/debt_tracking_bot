@@ -45,17 +45,6 @@ services:
         condition: service_healthy
     logging: *default-logging
 
-  # Optional SOCKS5 proxy to Telegram through a Hysteria2 server:
-  #   docker compose --profile proxy up -d --build   (+ PROXY_URL=socks5://hysteria:1080)
-  hysteria:
-    image: tobyxdd/hysteria:latest
-    profiles: ["proxy"]
-    restart: unless-stopped
-    command: ["client", "-c", "/etc/hysteria/config.yaml"]
-    volumes:
-      - ./hysteria/config.yaml:/etc/hysteria/config.yaml:ro
-    logging: *default-logging
-
 volumes:
   pgdata:
   redisdata:

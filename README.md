@@ -11,6 +11,19 @@
 Для работы нужен сервер (или компьютер) с Docker и Docker Compose v2. Всё остальное запускается
 в контейнерах: бот, PostgreSQL 16 и Redis 7.
 
+## Ветки
+
+- `master` — версия для сервера, откуда Telegram доступен напрямую (например, VPS за пределами
+  России). Именно её разворачивают на сервере.
+- `ru_version` — то же самое плюс клиент прокси Hysteria2 в `docker-compose.yml`: бот ходит
+  в Telegram через прокси. Для запуска внутри России.
+
+Изменения делаются в `master` и затем переносятся в `ru_version`:
+
+```bash
+git checkout ru_version && git merge master && git checkout master
+```
+
 ## 1. Создайте бота у @BotFather
 
 1. Откройте в Телеграме [@BotFather](https://t.me/BotFather) и отправьте `/newbot`.
@@ -134,15 +147,8 @@ PROXY_URL=socks5://user:password@proxy-host:1080
 
 и перезапустите: `docker compose up -d --build`.
 
-Для прокси-сервера Hysteria2 в `docker-compose.yml` есть необязательный контейнер-клиент:
-
-1. `cp hysteria/config.example.yaml hysteria/config.yaml` и заполните его по ссылке
-   `hysteria2://ПАРОЛЬ@СЕРВЕР:ПОРТ?insecure=1`: `server: СЕРВЕР:ПОРТ`, `auth: ПАРОЛЬ`,
-   `tls.insecure: true` (только если в ссылке было `insecure=1`).
-2. В `.env`: `PROXY_URL=socks5://hysteria:1080`.
-3. Запуск с профилем: `docker compose --profile proxy up -d --build`.
-
-Файл `hysteria/config.yaml` содержит пароль и не попадает в git.
+Если прокси — сервер Hysteria2, используйте ветку `ru_version`: в ней клиент Hysteria2 уже
+подключён в `docker-compose.yml`, настройка описана в её README.
 
 ## 9. Для разработчика
 

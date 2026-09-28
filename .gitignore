@@ -9,4 +9,5 @@ dist/
 .pytest_cache/
 
 .env
+# ru_version: Hysteria2 client config with the password
 hysteria/config.yaml

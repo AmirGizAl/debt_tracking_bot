@@ -27,3 +27,15 @@
 - Права проверяются и в интерфейсе (лишние кнопки скрыты), и в сервисах (`PermissionDenied`).
 - Все тексты для пользователя хранятся в `app/bot/texts.py`. Пользовательские данные в HTML-сообщениях экранируются.
 - Для тестов используй настоящий PostgreSQL, SQLite не подходит.
+
+## Ветки
+
+- `master` — основная ветка, она разворачивается на сервере. Вся разработка ведётся здесь.
+- `ru_version` — `master` плюс клиент Hysteria2 (прокси до Telegram) для запуска внутри России.
+  От `master` отличается только файлами прокси: `docker-compose.yml`, `.env.example`,
+  `hysteria/config.example.yaml`, раздел о прокси в `README.md`.
+- После коммитов в `master` перенеси их в `ru_version` слиянием:
+  `git checkout ru_version && git merge master && git checkout master`.
+  Не используй cherry-pick и rebase для `ru_version`.
+- Правки, касающиеся только прокси, делаются прямо в `ru_version` и в `master` не попадают.
+- На GitHub (`origin`) хранятся обе ветки.
