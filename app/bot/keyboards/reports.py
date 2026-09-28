@@ -10,7 +10,6 @@ from app.services.reports.data import PeriodPreset
 
 KIND_BUTTONS = (
     (ReportKind.SUMMARY, texts.BTN_REPORT_SUMMARY),
-    (ReportKind.DEBTS, texts.BTN_REPORT_DEBTS),
     (ReportKind.RECORDS, texts.BTN_REPORT_RECORDS),
     (ReportKind.CASH, texts.BTN_REPORT_CASH),
     (ReportKind.STATEMENT, texts.BTN_REPORT_STATEMENT),

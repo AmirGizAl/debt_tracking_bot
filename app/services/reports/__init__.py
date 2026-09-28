@@ -18,8 +18,8 @@ from app.services.reports.data import Period, ReportMeta
 
 
 class ReportKind(StrEnum):
+    # "Кто кому должен" (TZ 13.2) is a part of the summary since 28.09.2026.
     SUMMARY = "summary"
-    DEBTS = "debts"
     RECORDS = "records"
     CASH = "cash"
     STATEMENT = "statement"
@@ -35,8 +35,6 @@ PERIOD_KINDS = frozenset({ReportKind.RECORDS, ReportKind.CASH, ReportKind.STATEM
 _RENDERERS: dict[tuple[ReportKind, ReportFormat], Callable[[Any], bytes]] = {
     (ReportKind.SUMMARY, ReportFormat.XLSX): excel.summary_xlsx,
     (ReportKind.SUMMARY, ReportFormat.PDF): pdf.summary_pdf,
-    (ReportKind.DEBTS, ReportFormat.XLSX): excel.debts_xlsx,
-    (ReportKind.DEBTS, ReportFormat.PDF): pdf.debts_pdf,
     (ReportKind.RECORDS, ReportFormat.XLSX): excel.records_xlsx,
     (ReportKind.RECORDS, ReportFormat.PDF): pdf.records_pdf,
     (ReportKind.CASH, ReportFormat.XLSX): excel.cash_xlsx,
@@ -96,8 +94,6 @@ async def build_report(
     match kind:
         case ReportKind.SUMMARY:
             report = await data.summary_data(session, meta, rates or {})
-        case ReportKind.DEBTS:
-            report = await data.debts_data(session, meta)
         case ReportKind.RECORDS:
             report = await data.records_data(session, meta, period or Period())
         case ReportKind.CASH:

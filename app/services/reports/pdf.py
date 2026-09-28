@@ -28,7 +28,7 @@ from app.domain.dates import format_date
 from app.domain.money import format_amount, format_money, format_rate, format_signed
 from app.services.reports.data import (
     CashReport,
-    DebtsReport,
+    DebtSection,
     RecordsReport,
     ReportMeta,
     StatementReport,
@@ -236,38 +236,34 @@ def summary_pdf(report: SummaryReport) -> bytes:
             bold_rows={len(rows) - 1},
         )
     )
+    # "Кто кому должен" (TZ 13.2).
+    story += _debts(styles, texts.REPORT_OWED_TO_YOU, report.owed_to_you)
+    story += _debts(styles, texts.REPORT_YOU_OWE, report.you_owe)
     return _build(story, report.meta)
 
 
-def debts_pdf(report: DebtsReport) -> bytes:
-    styles = _Styles(9)
-    story = _header(styles, report.meta)
-    for title, sections in (
-        (texts.REPORT_OWED_TO_YOU, report.owed_to_you),
-        (texts.REPORT_YOU_OWE, report.you_owe),
-    ):
-        story.append(_paragraph(title, styles.heading))
-        if not sections:
-            story.append(_paragraph(texts.REPORT_NO_DEBTS, styles.text))
-            continue
-        for section in sections:
-            rows: list[tuple[Sequence[object], bool]] = [
-                ([line.client, format_amount(line.amount)], False) for line in section.lines
-            ]
-            rows.append(([texts.REPORT_TOTAL_BY_CURRENCY, format_amount(section.total)], False))
-            story.append(_paragraph(str(section.currency), styles.subheading))
-            story.append(
-                _table(
-                    styles,
-                    texts.debts_pdf_columns(section.currency),
-                    rows,
-                    [110, 50],
-                    numeric={1},
-                    bold_rows={len(rows) - 1},
-                )
+def _debts(styles: _Styles, title: str, sections: list[DebtSection]) -> list[Flowable]:
+    story: list[Flowable] = [_paragraph(title, styles.heading)]
+    if not sections:
+        story.append(_paragraph(texts.REPORT_NO_DEBTS, styles.text))
+    for section in sections:
+        rows: list[tuple[Sequence[object], bool]] = [
+            ([line.client, format_amount(line.amount)], False) for line in section.lines
+        ]
+        rows.append(([texts.REPORT_TOTAL_BY_CURRENCY, format_amount(section.total)], False))
+        story.append(_paragraph(str(section.currency), styles.subheading))
+        story.append(
+            _table(
+                styles,
+                texts.debts_pdf_columns(section.currency),
+                rows,
+                [110, 50],
+                numeric={1},
+                bold_rows={len(rows) - 1},
             )
-            story.append(Spacer(1, 3 * mm))
-    return _build(story, report.meta)
+        )
+        story.append(Spacer(1, 3 * mm))
+    return story
 
 
 def records_pdf(report: RecordsReport) -> bytes:

@@ -54,6 +54,11 @@ async def test_summary_after_scenarios_1_to_8(session: AsyncSession, owner: User
         (KZT, D("0.17"), D("170000")),
     ]
     assert report.kgs_total == D("2101750")
+    # «Кто кому должен» is a part of the summary (28.09.2026): only Бекзат is left in debt.
+    assert report.owed_to_you == []
+    assert [(s.currency, s.lines, s.total) for s in report.you_owe] == [
+        (RUB, [data.DebtLine("Бекзат", D("3000"))], D("3000")),
+    ]
 
 
 def test_rates_are_asked_only_for_nonzero_foreign_cash() -> None:
@@ -72,7 +77,7 @@ async def test_summary_rounds_each_line_before_adding(session: AsyncSession, own
     assert report.kgs_total == D("0.02")
 
 
-# --- 13.2 who owes whom ------------------------------------------------------------------------
+# --- 13.2 who owes whom (in the summary) --------------------------------------------------------
 
 
 async def test_client_can_be_in_both_sections(session: AsyncSession, owner: User) -> None:
@@ -84,7 +89,7 @@ async def test_client_can_be_in_both_sections(session: AsyncSession, owner: User
     await record(session, owner, ivan, OperationType.BORROW, "20000", RUB)
     await record(session, owner, azamat, OperationType.LEND, "900")
 
-    report = await data.debts_data(session, meta())
+    report = await data.summary_data(session, meta(), {USD: D("87.5"), RUB: D("1.1")})
 
     assert [(s.currency, [(line.client, line.amount) for line in s.lines], s.total)
             for s in report.owed_to_you] == [
@@ -94,6 +99,10 @@ async def test_client_can_be_in_both_sections(session: AsyncSession, owner: User
             for s in report.you_owe] == [
         (RUB, [("Иван", D("20000"))], D("20000")),
     ]  # fmt: skip
+    # Table 1 of the summary shows the totals of these lists.
+    by_currency = {row.currency: (row.owed_to_you, row.you_owe) for row in report.rows}
+    assert by_currency[USD] == (D("1600"), 0)
+    assert by_currency[RUB] == (0, D("20000"))
 
 
 # --- 13.3 all records --------------------------------------------------------------------------
@@ -229,7 +238,7 @@ async def test_summary_xlsx(session: AsyncSession, owner: User) -> None:
     content = excel.summary_xlsx(report)
 
     workbook = load_workbook(BytesIO(content))
-    assert workbook.sheetnames == ["Касса и долги", "Касса в сомах"]
+    assert workbook.sheetnames == ["Касса и долги", "Касса в сомах", "Вам должны", "Вы должны"]
     first = _cells(content, "Касса и долги")
     header = first.index(["Валюта", "В кассе", "Вам должны", "Вы должны", "Разница"])
     assert first[header + 4] == ["RUB", 530000, 0, 3000, -3000]
@@ -240,6 +249,12 @@ async def test_summary_xlsx(session: AsyncSession, owner: User) -> None:
     second = _cells(content, "Касса в сомах")
     assert second[-1][0] == "Итого"
     assert second[-1][3] == 2101750
+    owed = _cells(content, "Вам должны")
+    assert owed[-2:] == [["Валюта", "Клиент", "Сумма"], [None, "Долгов нет", None]]
+    owing = _cells(content, "Вы должны")
+    header = owing.index(["Валюта", "Клиент", "Сумма"])
+    assert owing[header + 1 :] == [["RUB", "Бекзат", 3000], ["RUB", "Итого по валюте", 3000]]
+    assert workbook["Вы должны"].cell(header + 3, 2).font.bold  # the total line
 
 
 async def test_records_xlsx_marks_cancelled_rows_grey(session: AsyncSession, owner: User) -> None:
@@ -333,7 +348,6 @@ def test_pdf_splits_long_tables_into_numbered_pages() -> None:
     ("kind", "fmt", "period", "client", "expected"),
     [
         (ReportKind.SUMMARY, ReportFormat.XLSX, None, None, "Общая_сводка_2026-09-27.xlsx"),
-        (ReportKind.DEBTS, ReportFormat.PDF, None, None, "Кто_кому_должен_2026-09-27.pdf"),
         (ReportKind.RECORDS, ReportFormat.PDF, SEPTEMBER, None, "Все_записи_2026-09-01_2026-09-30.pdf"),
         (ReportKind.CASH, ReportFormat.XLSX, Period(), None, "Движение_кассы_всё_время.xlsx"),
         (ReportKind.RECORDS, ReportFormat.XLSX, Period(date(2026, 9, 27), date(2026, 9, 27)), None, "Все_записи_2026-09-27.xlsx"),

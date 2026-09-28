@@ -18,7 +18,7 @@ from openpyxl.worksheet.worksheet import Worksheet
 from app.bot import texts
 from app.services.reports.data import (
     CashReport,
-    DebtsReport,
+    DebtSection,
     RecordsReport,
     ReportMeta,
     StatementReport,
@@ -172,32 +172,28 @@ def summary_xlsx(report: SummaryReport) -> bytes:
     )
     _labelled_value(sheet, last + 1, texts.REPORT_TOTAL, (4, report.kgs_total))
     _fit_columns(sheet, start + 1)
+
+    # "Кто кому должен" (TZ 13.2): a sheet per direction, currencies one after another.
+    _debts_sheet(workbook, report.meta, texts.REPORT_OWED_TO_YOU, report.owed_to_you)
+    _debts_sheet(workbook, report.meta, texts.REPORT_YOU_OWE, report.you_owe)
     return _save(workbook)
 
 
-def debts_xlsx(report: DebtsReport) -> bytes:
-    workbook = Workbook()
-    first = workbook.active
-    assert first is not None
-    for index, (title, sections) in enumerate(
-        ((texts.REPORT_OWED_TO_YOU, report.owed_to_you), (texts.REPORT_YOU_OWE, report.you_owe))
-    ):
-        sheet = first if index == 0 else workbook.create_sheet()
-        sheet.title = title
-        start = _meta(sheet, report.meta, [title])
-        rows: list[Row] = []
-        bold_rows: list[int] = []
-        for section in sections:
-            rows.extend(
-                ([section.currency, line.client, line.amount], False) for line in section.lines
-            )
-            bold_rows.append(len(rows))
-            rows.append(([section.currency, texts.REPORT_TOTAL_BY_CURRENCY, section.total], False))
-        if not rows:
-            rows.append((["", texts.REPORT_NO_DEBTS, None], False))
-        _table(sheet, start, texts.DEBTS_COLUMNS, rows, money={3}, bold_rows=bold_rows)
-        _fit_columns(sheet, start)
-    return _save(workbook)
+def _debts_sheet(
+    workbook: Workbook, meta: ReportMeta, title: str, sections: list[DebtSection]
+) -> None:
+    sheet = workbook.create_sheet(title)
+    start = _meta(sheet, meta, [title])
+    rows: list[Row] = []
+    bold_rows: list[int] = []
+    for section in sections:
+        rows.extend(([section.currency, line.client, line.amount], False) for line in section.lines)
+        bold_rows.append(len(rows))
+        rows.append(([section.currency, texts.REPORT_TOTAL_BY_CURRENCY, section.total], False))
+    if not rows:
+        rows.append((["", texts.REPORT_NO_DEBTS, None], False))
+    _table(sheet, start, texts.DEBTS_COLUMNS, rows, money={3}, bold_rows=bold_rows)
+    _fit_columns(sheet, start)
 
 
 def records_xlsx(report: RecordsReport) -> bytes:

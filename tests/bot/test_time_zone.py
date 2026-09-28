@@ -66,7 +66,7 @@ async def test_record_card_shows_moscow_time(
 async def test_report_is_stamped_with_moscow_time(owner_client: UserClient) -> None:
     await owner_client.send("/menu")
     await owner_client.click(texts.BTN_REPORTS)
-    await owner_client.click(texts.BTN_REPORT_DEBTS)
+    await owner_client.click(texts.BTN_REPORT_SUMMARY)  # no cash: no rates to ask
     await owner_client.click(texts.BTN_EXCEL)
 
     document = [m for m in owner_client.bot_messages if m.document_data][-1]

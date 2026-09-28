@@ -92,7 +92,7 @@ class ReportMeta:
     period: Period | None = None
 
 
-# --- 13.1 summary ----------------------------------------------------------------------------
+# --- 13.1 summary, with the lists of 13.2 "who owes whom" (merged on 28.09.2026) --------------
 
 
 @dataclass(frozen=True)
@@ -116,10 +116,28 @@ class KgsRow:
 
 
 @dataclass(frozen=True)
+class DebtLine:
+    client: str
+    amount: Decimal
+
+
+@dataclass(frozen=True)
+class DebtSection:
+    currency: Currency
+    lines: list[DebtLine]
+
+    @property
+    def total(self) -> Decimal:
+        return sum((line.amount for line in self.lines), ZERO)
+
+
+@dataclass(frozen=True)
 class SummaryReport:
     meta: ReportMeta
     rows: list[SummaryRow]
     kgs_rows: list[KgsRow]
+    owed_to_you: list[DebtSection]
+    you_owe: list[DebtSection]
 
     @property
     def kgs_total(self) -> Decimal:
@@ -146,19 +164,37 @@ async def _client_balances(session: AsyncSession) -> list[tuple[str, Currency, D
     return [(name, currency, total) for name, currency, total in rows if total != 0]
 
 
+def _sections(lines: dict[Currency, list[DebtLine]]) -> list[DebtSection]:
+    """Currencies in the usual order; clients by amount, largest first (TZ 13.2)."""
+    return [
+        DebtSection(currency, sorted(lines[currency], key=lambda line: (-line.amount, line.client)))
+        for currency in CURRENCIES
+        if lines.get(currency)
+    ]
+
+
 async def summary_data(
     session: AsyncSession, meta: ReportMeta, rates: dict[Currency, Decimal]
 ) -> SummaryReport:
     cash_balances = await cash.cash_balances(session)
-    owed: dict[Currency, Decimal] = defaultdict(lambda: ZERO)
-    owing: dict[Currency, Decimal] = defaultdict(lambda: ZERO)
-    for _name, currency, balance in await _client_balances(session):
+    owed: dict[Currency, list[DebtLine]] = defaultdict(list)
+    owing: dict[Currency, list[DebtLine]] = defaultdict(list)
+    for name, currency, balance in await _client_balances(session):
         if balance > 0:
-            owed[currency] += balance
+            owed[currency].append(DebtLine(name, balance))
         else:
-            owing[currency] += -balance
+            owing[currency].append(DebtLine(name, -balance))
+    owed_to_you, you_owe = _sections(owed), _sections(owing)
+    # The totals of table 1 are the totals of the client lists, so the two parts always agree.
+    owed_totals = {section.currency: section.total for section in owed_to_you}
+    owing_totals = {section.currency: section.total for section in you_owe}
     rows = [
-        SummaryRow(currency, cash_balances[currency], owed[currency], owing[currency])
+        SummaryRow(
+            currency,
+            cash_balances[currency],
+            owed_totals.get(currency, ZERO),
+            owing_totals.get(currency, ZERO),
+        )
         for currency in CURRENCIES
     ]
     kgs_rows = []
@@ -168,52 +204,7 @@ async def summary_data(
             continue
         rate = Decimal(1) if currency == HOME_CURRENCY else rates[currency]
         kgs_rows.append(KgsRow(currency, balance, rate, quantize_money(balance * rate)))
-    return SummaryReport(meta, rows, kgs_rows)
-
-
-# --- 13.2 who owes whom ----------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class DebtLine:
-    client: str
-    amount: Decimal
-
-
-@dataclass(frozen=True)
-class DebtSection:
-    currency: Currency
-    lines: list[DebtLine]
-
-    @property
-    def total(self) -> Decimal:
-        return sum((line.amount for line in self.lines), ZERO)
-
-
-@dataclass(frozen=True)
-class DebtsReport:
-    meta: ReportMeta
-    owed_to_you: list[DebtSection]
-    you_owe: list[DebtSection]
-
-
-def _sections(lines: dict[Currency, list[DebtLine]]) -> list[DebtSection]:
-    return [
-        DebtSection(currency, sorted(lines[currency], key=lambda line: (-line.amount, line.client)))
-        for currency in CURRENCIES
-        if lines.get(currency)
-    ]
-
-
-async def debts_data(session: AsyncSession, meta: ReportMeta) -> DebtsReport:
-    owed: dict[Currency, list[DebtLine]] = defaultdict(list)
-    owing: dict[Currency, list[DebtLine]] = defaultdict(list)
-    for name, currency, balance in await _client_balances(session):
-        if balance > 0:
-            owed[currency].append(DebtLine(name, balance))
-        else:
-            owing[currency].append(DebtLine(name, -balance))
-    return DebtsReport(meta, _sections(owed), _sections(owing))
+    return SummaryReport(meta, rows, kgs_rows, owed_to_you, you_owe)
 
 
 # --- 13.3 all records ------------------------------------------------------------------------
