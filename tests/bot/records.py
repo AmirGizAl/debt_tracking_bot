@@ -6,7 +6,7 @@ from app.bot import texts
 from app.domain.dates import format_date, today
 from tests.bot.harness import UserClient
 
-TZ = ZoneInfo("Asia/Bishkek")
+TZ = ZoneInfo("Europe/Moscow")
 
 
 def today_text() -> str:

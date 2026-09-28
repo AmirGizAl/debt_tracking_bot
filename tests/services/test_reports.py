@@ -21,7 +21,7 @@ from tests.services.accounting import adjust, record, reverse, scenarios_1_to_8
 
 KGS, USD, EUR, RUB, KZT = Currency.KGS, Currency.USD, Currency.EUR, Currency.RUB, Currency.KZT
 D = Decimal
-ZONE = ZoneInfo("Asia/Bishkek")
+ZONE = ZoneInfo("Europe/Moscow")
 NOW = datetime(2026, 9, 27, 18, 30, tzinfo=ZONE)
 SEPTEMBER = Period(date(2026, 9, 1), date(2026, 9, 30))
 SCENARIO_9_RATES = {USD: D("87.5"), EUR: D("100"), RUB: D("1.1"), KZT: D("0.17")}
