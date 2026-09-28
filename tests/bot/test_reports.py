@@ -5,6 +5,7 @@ from io import BytesIO
 
 import pytest
 from aiogram.enums import ChatAction
+from aiogram.fsm.storage.base import StorageKey
 from openpyxl import load_workbook
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,10 +15,12 @@ from app.bot.handlers import reports as handlers
 from app.db.models import User
 from app.domain.currency import Currency
 from app.domain.dates import today
+from app.domain.operations import OperationType
 from app.services import users
 from tests.bot.harness import Harness, UserClient
 from tests.bot.records import TZ
-from tests.services.accounting import adjust, scenarios_1_to_8
+from tests.factories import make_client
+from tests.services.accounting import adjust, record, scenarios_1_to_8
 
 
 async def open_report(client: UserClient, button: str) -> None:
@@ -56,9 +59,12 @@ async def test_scenario_9_summary(
 
     name, content = last_document(owner_client)
     assert name == f"Общая_сводка_{today(TZ).isoformat()}.xlsx"
-    rows = list(load_workbook(BytesIO(content))["Касса в сомах"].iter_rows(values_only=True))
+    workbook = load_workbook(BytesIO(content))
+    rows = list(workbook["Касса в сомах"].iter_rows(values_only=True))
     assert rows[-1][0] == "Итого"
     assert rows[-1][3] == 2101750
+    # «Кто кому должен» is inside the summary since 28.09.2026.
+    assert ("RUB", "Бекзат", 3000) in workbook["Вы должны"].iter_rows(values_only=True)
     assert owner_client.bot_messages[-1].text == texts.MAIN_MENU
     assert any(
         action.action == ChatAction.UPLOAD_DOCUMENT for action in harness.telegram.chat_actions
@@ -91,17 +97,70 @@ async def test_wrong_rate_is_asked_again(
     assert owner_client.last.text.endswith("Сколько сомов за 1 USD?")
 
 
-async def test_debts_report(
+async def test_report_menu(owner_client: UserClient) -> None:
+    await owner_client.send("/menu")
+    await owner_client.click(texts.BTN_REPORTS)
+
+    assert owner_client.last.buttons == [
+        [texts.BTN_REPORT_SUMMARY],
+        [texts.BTN_REPORT_RECORDS],
+        [texts.BTN_REPORT_CASH],
+        [texts.BTN_REPORT_STATEMENT],
+        [texts.BTN_HOME],
+    ]
+
+
+async def test_summary_lists_who_owes_whom(
     owner_client: UserClient, session: AsyncSession, owner_user: User
 ) -> None:
-    await scenarios_1_to_8(session, owner_user)
-    await open_report(owner_client, texts.BTN_REPORT_DEBTS)
+    await adjust(session, owner_user, "100000", Currency.KGS)
+    azamat = await make_client(session, owner_user, "Азамат")
+    bekzat = await make_client(session, owner_user, "Бекзат")
+    await record(session, owner_user, azamat, OperationType.LEND, "1000", Currency.KGS)
+    await record(session, owner_user, bekzat, OperationType.BORROW, "500", Currency.KGS)
+    await open_report(owner_client, texts.BTN_REPORT_SUMMARY)  # only KGS: no rates to ask
+
     await owner_client.click(texts.BTN_EXCEL)
 
     name, content = last_document(owner_client)
-    assert name == f"Кто_кому_должен_{today(TZ).isoformat()}.xlsx"
-    rows = list(load_workbook(BytesIO(content))["Вы должны"].iter_rows(values_only=True))
-    assert ("RUB", "Бекзат", 3000) in rows
+    assert name == f"Общая_сводка_{today(TZ).isoformat()}.xlsx"
+    workbook = load_workbook(BytesIO(content))
+    assert workbook.sheetnames == ["Касса и долги", "Касса в сомах", "Вам должны", "Вы должны"]
+    assert ("KGS", 99500, 1000, 500, 500) in workbook["Касса и долги"].iter_rows(values_only=True)
+    owed = list(workbook["Вам должны"].iter_rows(values_only=True))
+    assert owed[-2:] == [("KGS", "Азамат", 1000), ("KGS", "Итого по валюте", 1000)]
+    owing = list(workbook["Вы должны"].iter_rows(values_only=True))
+    assert owing[-2:] == [("KGS", "Бекзат", 500), ("KGS", "Итого по валюте", 500)]
+
+
+async def test_old_who_owes_whom_button(owner_client: UserClient) -> None:
+    # A report menu sent before the merge (28.09.2026) still has «Кто кому должен».
+    await owner_client.send("/menu")
+    await owner_client.click(texts.BTN_REPORTS)
+    menu = owner_client.last
+
+    popup = await owner_client.press(RepCb(action=RepAction.KIND, value="debts").pack(), menu)
+
+    assert popup.text == texts.STALE_ACTION
+    assert owner_client.last.text == texts.REPORTS_TITLE
+    assert owner_client.last.buttons[0] == [texts.BTN_REPORT_SUMMARY]
+
+
+async def test_who_owes_whom_started_before_the_merge(
+    harness: Harness, owner_client: UserClient
+) -> None:
+    await open_report(owner_client, texts.BTN_REPORT_SUMMARY)  # no cash: straight to the format
+    key = StorageKey(
+        bot_id=harness.bot.id, chat_id=owner_client.chat_id, user_id=owner_client.chat_id
+    )
+    data = await harness.dispatcher.fsm.storage.get_data(key)
+    await harness.dispatcher.fsm.storage.set_data(key, {**data, "kind": "debts"})
+
+    popup = await owner_client.click(texts.BTN_EXCEL)
+
+    assert popup == texts.STALE_ACTION
+    assert owner_client.last.text == texts.REPORTS_TITLE
+    assert not any(message.document_name for message in owner_client.bot_messages)
 
 
 async def test_period_buttons(owner_client: UserClient) -> None:
@@ -210,11 +269,12 @@ async def test_helper_can_build_reports(
     await users.add_helper(session, owner_user, "aigul_k")
     helper = harness.user(2002, username="aigul_k", first_name="Айгуль")
     await helper.send("/start")
-    await open_report(helper, texts.BTN_REPORT_DEBTS)
+    await open_report(helper, texts.BTN_REPORT_SUMMARY)
     await helper.click(texts.BTN_PDF)
 
-    name, _ = last_document(helper)
-    assert name.startswith("Кто_кому_должен_")
+    name, content = last_document(helper)
+    assert name == f"Общая_сводка_{today(TZ).isoformat()}.pdf"
+    assert content.startswith(b"%PDF")
 
 
 @pytest.mark.parametrize(

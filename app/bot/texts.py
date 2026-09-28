@@ -821,8 +821,7 @@ def bot_added_to_group(title: str | None, chat_id: int, connected: bool) -> str:
 # --- Reports (TZ 12.8, 13) ------------------------------------------------------------------
 
 REPORTS_TITLE = "Какой отчёт нужен?"
-BTN_REPORT_SUMMARY = "Общая сводка"
-BTN_REPORT_DEBTS = "Кто кому должен"
+BTN_REPORT_SUMMARY = "Общая сводка"  # with «Кто кому должен» inside since 28.09.2026
 BTN_REPORT_RECORDS = "Все записи за период"
 BTN_REPORT_CASH = "Движение кассы"
 BTN_REPORT_STATEMENT = "Выписка по клиенту"
@@ -842,7 +841,6 @@ STATEMENT_NO_CLIENTS = "Клиентов пока нет."
 
 REPORT_TITLES = {
     "summary": "Общая сводка",
-    "debts": "Кто кому должен",
     "records": "Все записи за период",
     "cash": "Движение кассы",
     "statement": "Выписка по клиенту",
@@ -850,7 +848,6 @@ REPORT_TITLES = {
 
 REPORT_FILE_PREFIXES = {
     "summary": "Общая_сводка",
-    "debts": "Кто_кому_должен",
     "records": "Все_записи",
     "cash": "Движение_кассы",
     "statement": "Выписка",

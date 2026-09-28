@@ -55,6 +55,14 @@ def _title(data: dict[str, Any]) -> str:
     return texts.REPORT_TITLES[data["kind"]]
 
 
+def _report_kind(value: str) -> ReportKind | None:
+    """None for a report of an older bot version: «Кто кому должен» is in the summary now."""
+    try:
+        return ReportKind(value)
+    except ValueError:
+        return None
+
+
 # --- screens -----------------------------------------------------------------------------------
 
 
@@ -130,8 +138,6 @@ async def _start(
             return
         await state.update_data(pending=[], rates={})
         await _show_format(event, state, bot)
-    elif kind == ReportKind.DEBTS:
-        await _show_format(event, state, bot)
     elif kind == ReportKind.STATEMENT:
         await _show_client_step(event, state, bot, session)
     else:
@@ -155,8 +161,14 @@ async def choose_report(
     bot: Bot,
     session: AsyncSession,
 ) -> None:
+    kind = _report_kind(callback_data.value)
+    if kind is None:
+        # A report menu sent before 28.09.2026 still has «Кто кому должен»: show the current one.
+        await show_reports_menu(callback, state, bot)
+        await answer(callback, texts.STALE_ACTION)
+        return
     await leave_scenario(callback, state, bot)
-    await _start(callback, state, bot, session, ReportKind(callback_data.value))
+    await _start(callback, state, bot, session, kind)
     await answer(callback)
 
 
@@ -300,9 +312,13 @@ async def send_report(
     user: User,
     settings: Settings,
 ) -> None:
-    await answer(callback)
     data = await state.get_data()
-    kind = ReportKind(data["kind"])
+    kind = _report_kind(data["kind"])
+    if kind is None:  # started before the update of 28.09.2026
+        await show_reports_menu(callback, state, bot)
+        await answer(callback, texts.STALE_ACTION)
+        return
+    await answer(callback)
     if kind == ReportKind.SUMMARY:
         # The cash may have changed while the rates were typed: ask for any missing rate.
         missing = [
@@ -344,7 +360,7 @@ async def send_report(
 async def back(callback: CallbackQuery, state: FSMContext, bot: Bot, session: AsyncSession) -> None:
     current = await state.get_state()
     data = await state.get_data()
-    kind = ReportKind(data["kind"])
+    kind = _report_kind(data["kind"])  # None: an old report, the menu is shown below
     if current == ReportFlow.client.state and data.get("query") is not None:
         await _show_client_step(callback, state, bot, session)
     elif current == ReportFlow.period.state and kind == ReportKind.STATEMENT:
