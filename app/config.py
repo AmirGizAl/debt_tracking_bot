@@ -17,7 +17,7 @@ class Settings(DatabaseSettings):
     bot_token: SecretStr
     owner_telegram_id: int
     redis_url: str | None = None
-    tz: str = "Asia/Bishkek"
+    tz: str = "Europe/Moscow"  # the customer works in Moscow time
     log_level: str = "INFO"
     proxy_url: str | None = None
 

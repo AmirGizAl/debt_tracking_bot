@@ -23,7 +23,7 @@ def settings(database_url: str) -> Settings:
         owner_telegram_id=OWNER_TG_ID,
         database_url=database_url,
         redis_url=None,
-        tz="Asia/Bishkek",
+        tz="Europe/Moscow",
     )
 
 
