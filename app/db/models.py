@@ -1,12 +1,13 @@
 import uuid
-from datetime import date, datetime
+from datetime import datetime
 from decimal import Decimal
 from enum import StrEnum
+from typing import Any
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     CheckConstraint,
-    Date,
     DateTime,
     Enum,
     ForeignKey,
@@ -18,11 +19,12 @@ from sqlalchemy import (
     func,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
 from app.domain.currency import Currency
-from app.domain.operations import OperationType
+from app.domain.entries import Book, EntryKind, OperationType
 
 MONEY = Numeric(18, 2)
 RATE = Numeric(18, 6)
@@ -39,6 +41,11 @@ class UserStatus(StrEnum):
     DELETED = "deleted"
 
 
+class DayStatus(StrEnum):
+    OPEN = "open"
+    CLOSED = "closed"
+
+
 def _pg_enum(enum_cls: type[StrEnum], name: str) -> Enum:
     return Enum(
         enum_cls,
@@ -50,6 +57,9 @@ def _pg_enum(enum_cls: type[StrEnum], name: str) -> Enum:
 
 CURRENCY_ENUM = _pg_enum(Currency, "currency")
 OPERATION_TYPE_ENUM = _pg_enum(OperationType, "operation_type")
+ENTRY_KIND_ENUM = _pg_enum(EntryKind, "entry_kind")
+BOOK_ENUM = _pg_enum(Book, "book")
+DAY_STATUS_ENUM = _pg_enum(DayStatus, "day_status")
 USER_ROLE_ENUM = _pg_enum(UserRole, "user_role")
 USER_STATUS_ENUM = _pg_enum(UserStatus, "user_status")
 
@@ -79,7 +89,7 @@ class User(Base):
             "uq_users_username",
             "username",
             unique=True,
-            postgresql_where=text("status <> 'deleted'"),
+            postgresql_where=text("status <> 'deleted' AND username IS NOT NULL"),
         ),
     )
 
@@ -108,82 +118,173 @@ class Client(Base):
 Index("uq_clients_name_lower", func.lower(Client.name), unique=True)
 
 
+class BusinessDay(Base):
+    """A working day: from one closing to the next (TZ 7). Exactly one day is open."""
+
+    __tablename__ = "business_days"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    status: Mapped[DayStatus] = mapped_column(DAY_STATUS_ENUM)
+    opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    closed_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    rates: Mapped[dict[str, str] | None] = mapped_column(JSONB)
+    report: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    surplus: Mapped[Decimal | None] = mapped_column(MONEY)
+
+    __table_args__ = (
+        Index(
+            "uq_business_days_open",
+            "status",
+            unique=True,
+            postgresql_where=text("status = 'open'"),
+        ),
+        # A closed day keeps its rates, report and surplus; an open day has none of them.
+        CheckConstraint(
+            "(status = 'open' AND closed_at IS NULL AND closed_by_id IS NULL AND rates IS NULL"
+            " AND report IS NULL AND surplus IS NULL)"
+            " OR (status = 'closed' AND closed_at IS NOT NULL AND closed_by_id IS NOT NULL"
+            " AND rates IS NOT NULL AND report IS NOT NULL AND surplus IS NOT NULL)",
+            name="closing_fields",
+        ),
+    )
+
+
+LOAN_TYPES_SQL = "('loan_give', 'loan_repay_in', 'loan_take', 'loan_repay_out')"
+
+
 class Operation(Base):
-    """Immutable journal record. Corrections are made by reversal records only."""
+    """Immutable journal record (TZ 12.4). Corrections are made by reversal records only."""
 
     __tablename__ = "operations"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     request_id: Mapped[uuid.UUID] = mapped_column(Uuid, unique=True)
+    day_id: Mapped[int] = mapped_column(ForeignKey("business_days.id"), index=True)
     type: Mapped[OperationType] = mapped_column(OPERATION_TYPE_ENUM)
-    client_id: Mapped[int] = mapped_column(ForeignKey("clients.id", ondelete="RESTRICT"))
-    debt_currency: Mapped[Currency] = mapped_column(CURRENCY_ENUM)
-    debt_amount: Mapped[Decimal] = mapped_column(MONEY)
-    cash_currency: Mapped[Currency] = mapped_column(CURRENCY_ENUM)
-    cash_amount: Mapped[Decimal] = mapped_column(MONEY)
+    client_id: Mapped[int | None] = mapped_column(
+        ForeignKey("clients.id", ondelete="RESTRICT"), index=True
+    )
+    currency: Mapped[Currency | None] = mapped_column(CURRENCY_ENUM)
+    amount: Mapped[Decimal | None] = mapped_column(MONEY)
+    give_currency: Mapped[Currency | None] = mapped_column(CURRENCY_ENUM)
+    give_amount: Mapped[Decimal | None] = mapped_column(MONEY)
+    get_currency: Mapped[Currency | None] = mapped_column(CURRENCY_ENUM)
+    get_amount: Mapped[Decimal | None] = mapped_column(MONEY)
     rate: Mapped[Decimal | None] = mapped_column(RATE)
     rate_base: Mapped[Currency | None] = mapped_column(CURRENCY_ENUM)
     rate_quote: Mapped[Currency | None] = mapped_column(CURRENCY_ENUM)
-    debt_delta: Mapped[Decimal] = mapped_column(MONEY)
-    cash_delta: Mapped[Decimal] = mapped_column(MONEY)
-    op_date: Mapped[date] = mapped_column(Date, index=True)
+    received_now: Mapped[bool | None] = mapped_column(Boolean)
+    paid_now: Mapped[bool | None] = mapped_column(Boolean)
     comment: Mapped[str | None] = mapped_column(Text)
+    reason: Mapped[str | None] = mapped_column(Text)
     author_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
     reversal_of_id: Mapped[int | None] = mapped_column(ForeignKey("operations.id"), unique=True)
     reversal_reason: Mapped[str | None] = mapped_column(Text)
 
-    client: Mapped[Client] = relationship(lazy="raise")
+    client: Mapped[Client | None] = relationship(lazy="raise")
     author: Mapped[User] = relationship(lazy="raise")
+    entries: Mapped[list["OperationEntry"]] = relationship(
+        back_populates="operation", lazy="raise", order_by="OperationEntry.id"
+    )
 
     __table_args__ = (
-        CheckConstraint("debt_amount > 0 AND cash_amount > 0", name="amounts_positive"),
+        # An exchange has its own fields; every other type has one currency and one amount.
         CheckConstraint(
-            "(debt_currency = cash_currency AND debt_amount = cash_amount"
-            " AND rate IS NULL AND rate_base IS NULL AND rate_quote IS NULL)"
-            " OR (debt_currency <> cash_currency"
+            "(type = 'exchange'"
+            " AND give_currency IS NOT NULL AND give_amount IS NOT NULL"
+            " AND get_currency IS NOT NULL AND get_amount IS NOT NULL"
+            " AND received_now IS NOT NULL AND paid_now IS NOT NULL"
+            " AND currency IS NULL AND amount IS NULL)"
+            " OR (type <> 'exchange'"
+            " AND currency IS NOT NULL AND amount IS NOT NULL"
+            " AND give_currency IS NULL AND give_amount IS NULL"
+            " AND get_currency IS NULL AND get_amount IS NULL"
+            " AND rate IS NULL AND rate_base IS NULL AND rate_quote IS NULL"
+            " AND received_now IS NULL AND paid_now IS NULL)",
+            name="fields_by_type",
+        ),
+        # Different currencies need a rate of their pair; one currency (a transfer) has none.
+        # IS NOT NULL is spelled out: a CHECK that evaluates to NULL would let the row in.
+        CheckConstraint(
+            "type <> 'exchange'"
+            " OR (give_currency <> get_currency"
             " AND rate IS NOT NULL AND rate_base IS NOT NULL AND rate_quote IS NOT NULL"
-            " AND ((rate_base = debt_currency AND rate_quote = cash_currency)"
-            " OR (rate_base = cash_currency AND rate_quote = debt_currency)))",
-            name="currency_rate",
-        ),
-        CheckConstraint("rate IS NULL OR rate > 0", name="rate_positive"),
-        CheckConstraint(
-            "type NOT IN ('lend', 'borrow') OR debt_currency = cash_currency",
-            name="new_debt_single_currency",
+            " AND rate > 0"
+            " AND ((rate_base = give_currency AND rate_quote = get_currency)"
+            " OR (rate_base = get_currency AND rate_quote = give_currency)))"
+            " OR (give_currency = get_currency"
+            " AND rate IS NULL AND rate_base IS NULL AND rate_quote IS NULL)",
+            name="exchange_rate",
         ),
         CheckConstraint(
-            "reversal_of_id IS NULL OR reversal_reason IS NOT NULL",
-            name="reversal_reason_required",
+            "type <> 'exchange' OR (give_amount > 0 AND get_amount > 0)",
+            name="exchange_amounts_positive",
         ),
-        # TZ 7.1: lend/repay_out raise the client's debt and take cash; repay_in/borrow do the
-        # opposite; a reversal flips both signs.
         CheckConstraint(
-            "debt_delta = CASE WHEN (type IN ('lend', 'repay_out')) = (reversal_of_id IS NULL)"
-            " THEN debt_amount ELSE -debt_amount END"
-            " AND cash_delta = CASE WHEN (type IN ('lend', 'repay_out')) = (reversal_of_id IS NULL)"
-            " THEN -cash_amount ELSE cash_amount END",
-            name="deltas_match_type",
+            "type <> 'exchange' OR client_id IS NOT NULL OR (received_now AND paid_now)",
+            name="exchange_client",
         ),
-        Index("ix_operations_client_id_debt_currency", "client_id", "debt_currency"),
-        Index("ix_operations_cash_currency", "cash_currency"),
+        # Same currency, same amount, both sides now: there is nothing to record (TZ 6.4).
+        CheckConstraint(
+            "type <> 'exchange' OR NOT (give_currency = get_currency"
+            " AND give_amount = get_amount AND received_now AND paid_now)",
+            name="exchange_not_empty",
+        ),
+        CheckConstraint(
+            "type = 'exchange'"
+            " OR (type = 'adjustment' AND amount <> 0)"
+            " OR (type <> 'adjustment' AND amount > 0)",
+            name="amount_sign",
+        ),
+        CheckConstraint(
+            f"type NOT IN {LOAN_TYPES_SQL} OR (currency = 'KGS' AND client_id IS NOT NULL)",
+            name="loan_fields",
+        ),
+        CheckConstraint(
+            "type NOT IN ('exchange_payout', 'exchange_receipt') OR client_id IS NOT NULL",
+            name="settlement_client",
+        ),
+        CheckConstraint(
+            "type NOT IN ('adjustment', 'opening') OR client_id IS NULL",
+            name="no_client",
+        ),
+        CheckConstraint("(type = 'adjustment') = (reason IS NOT NULL)", name="adjustment_reason"),
+        CheckConstraint(
+            "type <> 'adjustment' OR reversal_of_id IS NULL", name="adjustment_irreversible"
+        ),
+        CheckConstraint(
+            "(reversal_of_id IS NULL) = (reversal_reason IS NULL)", name="reversal_reason"
+        ),
     )
 
 
-class CashAdjustment(Base):
-    """Immutable manual cash correction made by the owner."""
+class OperationEntry(Base):
+    """One posting of a record: a balance change or an obligation change (TZ 12.5)."""
 
-    __tablename__ = "cash_adjustments"
+    __tablename__ = "operation_entries"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    request_id: Mapped[uuid.UUID] = mapped_column(Uuid, unique=True)
-    currency: Mapped[Currency] = mapped_column(CURRENCY_ENUM, index=True)
-    amount: Mapped[Decimal] = mapped_column(MONEY)
-    reason: Mapped[str] = mapped_column(Text)
-    adj_date: Mapped[date] = mapped_column(Date)
-    author_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    operation_id: Mapped[int] = mapped_column(ForeignKey("operations.id"), index=True)
+    kind: Mapped[EntryKind] = mapped_column(ENTRY_KIND_ENUM)
+    currency: Mapped[Currency] = mapped_column(CURRENCY_ENUM)
+    book: Mapped[Book | None] = mapped_column(BOOK_ENUM)
+    client_id: Mapped[int | None] = mapped_column(ForeignKey("clients.id", ondelete="RESTRICT"))
+    delta: Mapped[Decimal] = mapped_column(MONEY)
 
-    author: Mapped[User] = relationship(lazy="raise")
+    operation: Mapped[Operation] = relationship(back_populates="entries", lazy="raise")
 
-    __table_args__ = (CheckConstraint("amount <> 0", name="amount_nonzero"),)
+    __table_args__ = (
+        CheckConstraint("delta <> 0", name="delta_nonzero"),
+        CheckConstraint(
+            "(kind = 'cash' AND book IS NULL AND client_id IS NULL)"
+            " OR (kind = 'obligation' AND book IS NOT NULL AND client_id IS NOT NULL)",
+            name="fields_by_kind",
+        ),
+        CheckConstraint("book IS NULL OR book <> 'loan' OR currency = 'KGS'", name="loan_kgs"),
+        Index("ix_operation_entries_kind_currency", "kind", "currency"),
+        Index("ix_operation_entries_client_id_book_currency", "client_id", "book", "currency"),
+    )

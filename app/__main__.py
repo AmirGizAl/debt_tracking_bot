@@ -16,7 +16,7 @@ from app.bot.dispatcher import (
 from app.config import Settings
 from app.db.session import create_engine, create_sessionmaker
 from app.logging import setup_logging
-from app.services import users
+from app.services import days, users
 
 logger = logging.getLogger("app")
 
@@ -43,11 +43,16 @@ async def run() -> None:
     try:
         await wait_for_database(engine)
         async with sessionmaker() as session:
-            await users.ensure_owner(session, settings.owner_telegram_id)
+            await users.sync_owners(session, settings.owner_telegram_ids)
+            day = await days.ensure_open_day(session)
         dispatcher = create_dispatcher(settings, sessionmaker, create_storage(settings))
         await prepare_bot(bot)
         await check_group(bot, settings)
-        logger.info("Bot started, owner telegram_id=%s", settings.owner_telegram_id)
+        logger.info(
+            "Bot started, owners telegram_id=%s, open day №%s",
+            ",".join(map(str, settings.owner_telegram_ids)),
+            day.id,
+        )
         await dispatcher.start_polling(
             bot,
             allowed_updates=dispatcher.resolve_used_update_types(),

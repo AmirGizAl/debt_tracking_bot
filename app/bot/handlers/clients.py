@@ -1,4 +1,4 @@
-"""Clients section: list, search, add, card, edit, delete (TZ 10, 12.6)."""
+"""Clients section: list, search, add, card, edit, delete (TZ 13.6)."""
 
 from aiogram import Bot, F, Router
 from aiogram.fsm.context import FSMContext
@@ -6,9 +6,8 @@ from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.bot import texts
-from app.bot.callbacks import ClientsAction, ClientsCb, HistoryCb, MenuAction, MenuCb
+from app.bot.callbacks import ClientsAction, ClientsCb, MenuAction, MenuCb
 from app.bot.keyboards import clients as kb
-from app.bot.keyboards import records as records_kb
 from app.bot.states import ClientsFlow
 from app.bot.ui import (
     OnScreen,
@@ -24,7 +23,7 @@ from app.bot.ui import (
 )
 from app.db.models import Client, User
 from app.domain import errors
-from app.services import balances, clients, operations
+from app.services import clients
 
 router = Router(name="clients")
 
@@ -86,13 +85,9 @@ async def clients_page(
 async def render_card(
     bot: Bot, callback: CallbackQuery, session: AsyncSession, client: Client
 ) -> None:
-    client_balances = await balances.client_balances(session, client.id)
     can_delete = not await clients.has_operations(session, client.id)
     await edit_or_send(
-        bot,
-        callback.message,
-        texts.client_card(client, client_balances),
-        kb.client_card(client, can_delete),
+        bot, callback.message, texts.client_card(client), kb.client_card(client, can_delete)
     )
 
 
@@ -213,7 +208,13 @@ async def _create_client(
         )
         return
     await finish(
-        bot, state, chat_id, user, texts.client_added(client.name), kb.open_client(client.id)
+        bot,
+        state,
+        chat_id,
+        user,
+        session,
+        texts.client_added(client.name),
+        kb.open_client(client.id),
     )
 
 
@@ -294,13 +295,14 @@ async def receive_new_name(
         )
         return
     except errors.ClientNotFound:
-        await finish(bot, state, message.chat.id, user, texts.CLIENT_NOT_FOUND)
+        await finish(bot, state, message.chat.id, user, session, texts.CLIENT_NOT_FOUND)
         return
     await finish(
         bot,
         state,
         message.chat.id,
         user,
+        session,
         texts.client_renamed(client.name),
         kb.open_client(client.id),
     )
@@ -348,10 +350,10 @@ async def _save_comment(
         )
         return
     except errors.ClientNotFound:
-        await finish(bot, state, chat_id, user, texts.CLIENT_NOT_FOUND)
+        await finish(bot, state, chat_id, user, session, texts.CLIENT_NOT_FOUND)
         return
     result = texts.COMMENT_SAVED if client.comment else texts.COMMENT_REMOVED
-    await finish(bot, state, chat_id, user, result, kb.open_client(client.id))
+    await finish(bot, state, chat_id, user, session, result, kb.open_client(client.id))
 
 
 @router.message(ClientsFlow.edit_comment, F.text)
@@ -416,49 +418,6 @@ async def delete_client(
         return
     await answer(callback)
     await drop_keyboard(bot, callback.message.chat.id, callback.message.message_id)
-    await finish(bot, state, callback.message.chat.id, user, texts.client_deleted(client.name))
-
-
-# --- history (TZ 12.6) -------------------------------------------------------------------------
-
-
-async def _show_history(
-    callback: CallbackQuery,
-    state: FSMContext,
-    bot: Bot,
-    session: AsyncSession,
-    client_id: int,
-    number: int,
-) -> None:
-    client = await _client_or_stale(callback, session, client_id)
-    if client is None:
-        return
-    await leave_scenario(callback, state, bot)
-    page = await operations.client_history(session, client.id, number)
-    text = texts.history_title(client.name)
-    if page.total == 0:
-        text += f"\n{texts.HISTORY_EMPTY}"
-    await edit_or_send(bot, callback.message, text, records_kb.history(client.id, page))
-    await answer(callback)
-
-
-@router.callback_query(_action(ClientsAction.HISTORY))
-async def open_history(
-    callback: CallbackQuery,
-    callback_data: ClientsCb,
-    state: FSMContext,
-    bot: Bot,
-    session: AsyncSession,
-) -> None:
-    await _show_history(callback, state, bot, session, callback_data.client_id, 0)
-
-
-@router.callback_query(HistoryCb.filter())
-async def history_page(
-    callback: CallbackQuery,
-    callback_data: HistoryCb,
-    state: FSMContext,
-    bot: Bot,
-    session: AsyncSession,
-) -> None:
-    await _show_history(callback, state, bot, session, callback_data.client_id, callback_data.page)
+    await finish(
+        bot, state, callback.message.chat.id, user, session, texts.client_deleted(client.name)
+    )

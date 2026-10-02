@@ -20,9 +20,10 @@ from app.db.models import User, UserRole, UserStatus
 from app.db.session import create_engine, create_sessionmaker
 
 ROOT = Path(__file__).resolve().parent.parent
-TABLES = ("operations", "cash_adjustments", "clients", "users")
+TABLES = ("operation_entries", "operations", "business_days", "clients", "users")
 
 OWNER_TG_ID = 1001
+SECOND_OWNER_TG_ID = 1003  # TZ 17.1: the acceptance runs with two owners
 
 
 def _database_url() -> str:

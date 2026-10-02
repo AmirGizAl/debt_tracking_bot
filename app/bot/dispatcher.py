@@ -8,24 +8,18 @@ from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramAPIError, TelegramNetworkError
 from aiogram.fsm.storage.base import BaseStorage
 from aiogram.fsm.storage.memory import MemoryStorage, SimpleEventIsolation
-from aiogram.fsm.storage.redis import RedisStorage
+from aiogram.fsm.storage.redis import DefaultKeyBuilder, RedisStorage
 from aiogram.types import BotCommand, BotCommandScopeDefault
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.bot import texts
 from app.bot.handlers import (
-    cash,
     clients,
     errors,
     fallback,
     group,
-    lend_borrow,
     menu,
-    operation_card,
-    operation_steps,
     panel,
-    repay,
-    reports,
     start,
 )
 from app.bot.handlers import settings as settings_handlers
@@ -42,9 +36,16 @@ BOT_COMMANDS = (
 )
 
 
+# Dialog states of version 1 stay under the old "fsm" prefix and are never read again: a
+# half-done v1 scenario must not meet the handlers of version 2 after the update.
+FSM_KEY_PREFIX = "fsm_v2"
+
+
 def create_storage(settings: Settings) -> BaseStorage:
     if settings.redis_url:
-        return RedisStorage.from_url(settings.redis_url)
+        return RedisStorage.from_url(
+            settings.redis_url, key_builder=DefaultKeyBuilder(prefix=FSM_KEY_PREFIX)
+        )
     logger.warning("REDIS_URL is not set: dialog states are kept in memory and lost on restart")
     return MemoryStorage()
 
@@ -86,12 +87,6 @@ def create_dispatcher(
         panel.router,
         settings_handlers.router,
         clients.router,
-        lend_borrow.router,
-        repay.router,
-        operation_steps.router,
-        operation_card.router,
-        cash.router,
-        reports.router,
         fallback.router,
     )
     return dispatcher

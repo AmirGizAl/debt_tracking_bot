@@ -6,10 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Client, User
 from app.domain import errors
-from app.domain.currency import Currency
-from app.domain.operations import OperationType
-from app.services import balances, clients
-from tests.factories import make_client, make_operation
+from app.services import clients
+from tests.factories import make_client, make_loan
 
 
 def test_normalize_name_trims_and_collapses_spaces() -> None:
@@ -78,7 +76,7 @@ async def test_client_without_operations_can_be_deleted(session: AsyncSession, o
 
 async def test_client_with_operations_cannot_be_deleted(session: AsyncSession, owner: User) -> None:
     client = await clients.create_client(session, owner, "Иван")
-    await make_operation(session, owner, client, OperationType.LEND, "100")
+    await make_loan(session, owner, client, "100")
 
     assert await clients.has_operations(session, client.id)
     with pytest.raises(errors.ClientHasOperations):
@@ -126,28 +124,10 @@ async def test_recent_clients_by_last_activity(session: AsyncSession, owner: Use
     just_created = await make_client(session, owner, "Новый", created_at=base + timedelta(days=5))
     for number in range(4):
         await make_client(session, owner, f"Давний {number}", created_at=base - timedelta(days=9))
-    await make_operation(
-        session, owner, old_debtor, OperationType.LEND, "1", created_at=base + timedelta(days=1)
-    )
-    await make_operation(
-        session, owner, fresh_debtor, OperationType.LEND, "1", created_at=base + timedelta(days=9)
-    )
+    await make_loan(session, owner, old_debtor, "1", created_at=base + timedelta(days=1))
+    await make_loan(session, owner, fresh_debtor, "1", created_at=base + timedelta(days=9))
 
     recent = await clients.recent_clients(session)
 
     assert [c.name for c in recent[:3]] == [fresh_debtor.name, just_created.name, old_debtor.name]
     assert len(recent) == 6
-
-
-async def test_client_balances_sum_the_journal(session: AsyncSession, owner: User) -> None:
-    ivan = await make_client(session, owner, "Иван")
-    await make_operation(session, owner, ivan, OperationType.LEND, "1000")
-    await make_operation(session, owner, ivan, OperationType.BORROW, "300")
-    await make_operation(session, owner, ivan, OperationType.BORROW, "20000", Currency.RUB)
-
-    result = await balances.client_balances(session, ivan.id)
-
-    assert result[Currency.USD] == 700
-    assert result[Currency.RUB] == -20000
-    assert result[Currency.KGS] == 0
-    assert list(result) == list(Currency)

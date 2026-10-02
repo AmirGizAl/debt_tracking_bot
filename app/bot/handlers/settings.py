@@ -88,7 +88,7 @@ async def receive_username(
         await show_step(message, state, bot, texts.USERNAME_ALREADY_ADDED, kb.ask_username())
         return
     assert helper.username is not None
-    await finish(bot, state, message.chat.id, user, texts.helper_added(helper.username))
+    await finish(bot, state, message.chat.id, user, session, texts.helper_added(helper.username))
 
 
 @router.callback_query(SettingsCb.filter(F.action == SettingsAction.OPEN))
@@ -167,5 +167,5 @@ async def delete_helper(
         await state.storage.set_data(key, {})
     await answer(callback)
     await drop_keyboard(bot, callback.message.chat.id, callback.message.message_id)
-    await finish(bot, state, callback.message.chat.id, user, texts.helper_deleted(helper))
+    await finish(bot, state, callback.message.chat.id, user, session, texts.helper_deleted(helper))
     await notify_group(bot, settings, texts.helper_deleted(helper))

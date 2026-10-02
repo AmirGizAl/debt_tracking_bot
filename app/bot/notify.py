@@ -1,4 +1,4 @@
-"""Messages the bot sends on its own: to the owner and to the group of GROUP_CHAT_ID.
+"""Messages the bot sends on its own: to the owners and to the group of GROUP_CHAT_ID.
 
 All of them are best effort. A failed notification must never undo or hide the action that
 caused it, so they go out after the user has got the result and never raise.
@@ -11,21 +11,25 @@ from aiogram.exceptions import TelegramAPIError, TelegramMigrateToChat
 from aiogram.types import InlineKeyboardMarkup
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.bot import texts
 from app.config import Settings
-from app.services import balances, cash, operations
+from app.services import users
 
 logger = logging.getLogger(__name__)
 
 
-async def notify_owner(
-    bot: Bot, settings: Settings, text: str, reply_markup: InlineKeyboardMarkup | None = None
+async def notify_owners(
+    bot: Bot,
+    session: AsyncSession,
+    text: str,
+    reply_markup: InlineKeyboardMarkup | None = None,
 ) -> None:
-    """The owner may not have opened the bot yet or may have blocked it."""
-    try:
-        await bot.send_message(settings.owner_telegram_id, text, reply_markup=reply_markup)
-    except TelegramAPIError as exc:
-        logger.warning("Cannot notify the owner: %s", exc)
+    """Every active owner gets it (TZ 13.11); an owner who never opened the bot is skipped."""
+    for owner in await users.active_owners(session):
+        assert owner.telegram_id is not None
+        try:
+            await bot.send_message(owner.telegram_id, text, reply_markup=reply_markup)
+        except TelegramAPIError as exc:
+            logger.warning("Cannot notify the owner %s: %s", owner.telegram_id, exc)
 
 
 async def notify_group(bot: Bot, settings: Settings, text: str) -> None:
@@ -49,39 +53,3 @@ async def notify_group(bot: Bot, settings: Settings, text: str) -> None:
             await bot.send_message(exc.migrate_to_chat_id, text)
     except TelegramAPIError as exc:
         logger.warning("Cannot post to the group %s: %s", chat_id, exc)
-
-
-async def post_record(
-    bot: Bot, settings: Settings, session: AsyncSession, operation_id: int
-) -> None:
-    """A new record or a reversal, with the client's balance and the cash after it."""
-    if settings.group_chat_id is None:
-        return
-    try:
-        operation = await operations.get_operation(session, operation_id)
-        balance = await balances.client_balance(
-            session, operation.client_id, operation.debt_currency
-        )
-        cash_after = await cash.cash_balance(session, operation.cash_currency)
-    except Exception:
-        logger.exception("Cannot prepare the group post about record %s", operation_id)
-        return
-    text = texts.group_record_notice(operation, balance, cash_after, settings.zone)
-    await notify_group(bot, settings, text)
-
-
-async def post_adjustment(
-    bot: Bot, settings: Settings, session: AsyncSession, adjustment_id: int
-) -> None:
-    """A cash adjustment with the cash after it."""
-    if settings.group_chat_id is None:
-        return
-    try:
-        adjustment = await cash.get_adjustment(session, adjustment_id)
-        assert adjustment is not None
-        cash_after = await cash.cash_balance(session, adjustment.currency)
-    except Exception:
-        logger.exception("Cannot prepare the group post about adjustment %s", adjustment_id)
-        return
-    text = texts.group_adjustment_notice(adjustment, cash_after, settings.zone)
-    await notify_group(bot, settings, text)

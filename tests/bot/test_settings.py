@@ -32,7 +32,7 @@ async def test_owner_invites_helper(owner_client: UserClient) -> None:
     assert result.text == (
         "Помощник @aigul_k добавлен. Попросите его открыть бота и нажать «Старт»."
     )
-    assert menu.text == texts.MAIN_MENU
+    assert menu.text == texts.main_menu(1)
 
 
 async def test_invalid_and_duplicate_usernames_keep_waiting(owner_client: UserClient) -> None:
@@ -56,7 +56,7 @@ async def test_helper_activates_on_first_message(
 
     await helper.send("/start")
 
-    assert helper.last.text == texts.MAIN_MENU
+    assert helper.last.text == texts.main_menu(1)
     assert texts.BTN_SETTINGS not in helper.last.button_texts
     assert owner_client.last.text == "Новый помощник в боте: Айгуль (@aigul_k)."
 
@@ -70,7 +70,7 @@ async def test_activation_survives_unreachable_owner(
 
     await helper.send("hello")
 
-    assert helper.last.text == texts.MAIN_MENU
+    assert helper.last.text == texts.main_menu(1)
 
 
 async def test_invited_helper_without_username_gets_hint(
@@ -136,4 +136,4 @@ async def test_helper_cannot_open_settings(harness: Harness, owner_client: UserC
     for action in (SettingsAction.HOME, SettingsAction.HELPERS, SettingsAction.ADD):
         answer = await helper.press(SettingsCb(action=action).pack(), helper.last)
         assert answer.text == texts.PERMISSION_DENIED
-    assert helper.last.text == texts.MAIN_MENU
+    assert helper.last.text == texts.main_menu(1)

@@ -9,11 +9,11 @@ import logging
 
 from aiogram import Bot, F, Router
 from aiogram.enums import ChatType
+from aiogram.exceptions import TelegramAPIError
 from aiogram.filters import JOIN_TRANSITION, ChatMemberUpdatedFilter
 from aiogram.types import ChatMemberUpdated
 
 from app.bot import texts
-from app.bot.notify import notify_owner
 from app.config import Settings
 
 logger = logging.getLogger(__name__)
@@ -31,7 +31,13 @@ async def added_to_group(event: ChatMemberUpdated, bot: Bot, settings: Settings)
         chat.id,
         event.from_user.id,
     )
-    if event.from_user.id != settings.owner_telegram_id:
+    if event.from_user.id not in settings.owner_telegram_ids:
         return
     connected = chat.id == settings.group_chat_id
-    await notify_owner(bot, settings, texts.bot_added_to_group(chat.title, chat.id, connected))
+    try:
+        await bot.send_message(
+            event.from_user.id, texts.bot_added_to_group(chat.title, chat.id, connected)
+        )
+    except TelegramAPIError as exc:
+        # The owner may never have opened the bot in private.
+        logger.warning("Cannot tell the owner about the group: %s", exc)

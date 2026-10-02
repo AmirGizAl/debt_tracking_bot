@@ -10,45 +10,31 @@ from aiogram.types import Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.bot import texts
-from app.bot.flows import operation
-from app.bot.handlers.cash import show_cash
 from app.bot.handlers.clients import show_clients
-from app.bot.handlers.reports import show_reports_menu
 from app.bot.handlers.settings import show_settings
+from app.bot.keyboards.common import MENU_ROWS, OWNER_ROW
+from app.bot.ui import leave_any
 from app.db.models import User
-from app.domain.operations import OperationType
 
 router = Router(name="panel")
 
-RECORD_BUTTONS = {
-    texts.BTN_LEND: OperationType.LEND,
-    texts.BTN_REPAY_IN: OperationType.REPAY_IN,
-    texts.BTN_BORROW: OperationType.BORROW,
-    texts.BTN_REPAY_OUT: OperationType.REPAY_OUT,
-}
-SECTION_BUTTONS = {texts.BTN_CLIENTS, texts.BTN_CASH, texts.BTN_REPORTS, texts.BTN_SETTINGS}
+PANEL_TEXTS = frozenset(text for row in (*MENU_ROWS, OWNER_ROW) for text, _ in row)
+OWNER_TEXTS = frozenset(text for text, _ in OWNER_ROW)
 
 
-@router.message(F.text.in_(set(RECORD_BUTTONS)))
-async def record_button(
-    message: Message, state: FSMContext, bot: Bot, session: AsyncSession
-) -> None:
-    assert message.text is not None
-    await operation.begin(message, state, bot, session, RECORD_BUTTONS[message.text])
-
-
-@router.message(F.text.in_(SECTION_BUTTONS))
+@router.message(F.text.in_(PANEL_TEXTS))
 async def section_button(
     message: Message, state: FSMContext, bot: Bot, session: AsyncSession, user: User
 ) -> None:
+    if message.text in OWNER_TEXTS and not user.is_owner:
+        # A helper has no such buttons; typing the words opens nothing (TZ 5).
+        await message.answer(texts.PERMISSION_DENIED)
+        return
     if message.text == texts.BTN_CLIENTS:
         await show_clients(message, state, bot, session)
-    elif message.text == texts.BTN_CASH:
-        await show_cash(message, state, bot, session, user)
-    elif message.text == texts.BTN_REPORTS:
-        await show_reports_menu(message, state, bot)
-    elif user.is_owner:
+    elif message.text == texts.BTN_SETTINGS:
         await show_settings(message, state, bot)
     else:
-        # A helper has no such button; typing the word does not open the settings (TZ 5).
-        await message.answer(texts.PERMISSION_DENIED)
+        # Sections of version 2 that are not built yet (docs/V2_PLAN.md).
+        await leave_any(message, state, bot)
+        await message.answer(texts.SECTION_SOON)

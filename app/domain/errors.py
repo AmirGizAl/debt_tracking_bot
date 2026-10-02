@@ -1,9 +1,6 @@
-"""Domain exceptions. Services raise them, bot handlers translate them into texts (TZ 14.1)."""
+"""Domain exceptions. Services raise them, bot handlers translate them into texts (TZ 15.1)."""
 
-from decimal import Decimal
 from enum import StrEnum
-
-from app.domain.currency import Currency
 
 
 class DomainError(Exception):
@@ -57,10 +54,6 @@ class EmptyText(DomainError):
     pass
 
 
-class InvalidOperationData(DomainError):
-    """A draft that breaks the record rules (should never come from the bot UI)."""
-
-
 # --- users -----------------------------------------------------------------------------------
 
 
@@ -103,15 +96,7 @@ class ClientNotFound(NotFound):
     pass
 
 
-# --- money -----------------------------------------------------------------------------------
-
-
-class InsufficientCash(DomainError):
-    def __init__(self, currency: Currency, available: Decimal, required: Decimal) -> None:
-        super().__init__(f"{currency}: available {available}, required {required}")
-        self.currency = currency
-        self.available = available
-        self.required = required
+# --- records ---------------------------------------------------------------------------------
 
 
 class OperationNotFound(NotFound):
@@ -119,8 +104,4 @@ class OperationNotFound(NotFound):
 
 
 class AlreadyReversed(DomainError):
-    pass
-
-
-class CannotReverseReversal(DomainError):
     pass

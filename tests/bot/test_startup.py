@@ -64,25 +64,28 @@ async def test_cancel_in_the_middle_of_a_scenario(owner_client: UserClient) -> N
 
     assert [m.text for m in owner_client.bot_messages[-2:]] == [
         texts.ACTION_CANCELLED,
-        texts.MAIN_MENU,
+        texts.main_menu(1),
     ]
     assert prompt.markup is None  # the abandoned step lost its buttons
     await owner_client.send("Иван")  # no longer a client name
-    assert owner_client.last.text == texts.MAIN_MENU
+    assert owner_client.last.text == texts.main_menu(1)
 
 
-async def _to_amount(client: UserClient) -> None:
+async def _to_client_name(client: UserClient) -> None:
     await client.send("/menu")
-    await client.click(texts.BTN_BORROW)
-    await client.click(texts.BTN_NEW_CLIENT)
+    await client.click(texts.BTN_CLIENTS)
+    await client.click(texts.BTN_ADD)
+
+
+async def _to_client_comment(client: UserClient) -> None:
+    await _to_client_name(client)
     await client.send("Иван")
-    await client.click(texts.BTN_SKIP)
-    await client.click("USD")
 
 
-async def _to_comment(client: UserClient) -> None:
-    await _to_amount(client)
-    await client.send("100")
+async def _to_client_search(client: UserClient) -> None:
+    await client.send("/menu")
+    await client.click(texts.BTN_CLIENTS)
+    await client.click(texts.BTN_FIND)
 
 
 async def _to_helper_username(client: UserClient) -> None:
@@ -92,39 +95,13 @@ async def _to_helper_username(client: UserClient) -> None:
     await client.click(texts.BTN_ADD)
 
 
-async def _to_adjustment_reason(client: UserClient) -> None:
-    await client.send("/menu")
-    await client.click(texts.BTN_CASH)
-    await client.click(texts.BTN_ADJUST)
-    await client.click("USD")
-    await client.click(texts.BTN_ADD_MONEY)
-    await client.send("100")
-
-
-async def _to_cancel_reason(client: UserClient) -> None:
-    await _to_comment(client)
-    await client.click(texts.BTN_SKIP)
-    await client.click(texts.BTN_SAVE)
-    await client.click(texts.BTN_OPEN_RECORD)
-    await client.click(texts.BTN_CANCEL_RECORD)
-
-
-async def _to_statement_search(client: UserClient) -> None:
-    await client.send("/menu")
-    await client.click(texts.BTN_REPORTS)
-    await client.click(texts.BTN_REPORT_STATEMENT)
-    await client.click(texts.BTN_FIND)
-
-
 @pytest.mark.parametrize(
     "reach",
     [
-        _to_amount,
-        _to_comment,
+        _to_client_name,
+        _to_client_comment,
+        _to_client_search,
         _to_helper_username,
-        _to_adjustment_reason,
-        _to_cancel_reason,
-        _to_statement_search,
     ],
 )
 @pytest.mark.parametrize("command", ["/cancel", "/menu"])
@@ -137,6 +114,6 @@ async def test_commands_win_over_text_steps(
 
     await owner_client.send(command)
 
-    assert owner_client.bot_messages[-1].text == texts.MAIN_MENU
+    assert owner_client.bot_messages[-1].text == texts.main_menu(1)
     await owner_client.send("123")
-    assert owner_client.last.text == texts.MAIN_MENU  # nothing is waiting for input anymore
+    assert owner_client.last.text == texts.main_menu(1)  # nothing is waiting for input anymore

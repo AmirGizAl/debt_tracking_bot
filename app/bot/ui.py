@@ -21,10 +21,12 @@ from aiogram.types import (
     Message,
     TelegramObject,
 )
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.bot import texts
 from app.bot.keyboards.common import main_menu
 from app.db.models import User
+from app.services import days
 
 logger = logging.getLogger(__name__)
 
@@ -119,22 +121,32 @@ async def show_step(
     await state.update_data({SCREEN_KEY: message_id})
 
 
+async def menu_text(session: AsyncSession) -> str:
+    """ "День №N. Выберите действие:" with the day open right now (TZ 13.2)."""
+    return texts.main_menu(await days.open_day_number(session))
+
+
+async def send_menu(bot: Bot, chat_id: int, user: User, session: AsyncSession) -> None:
+    await bot.send_message(chat_id, await menu_text(session), reply_markup=main_menu(user))
+
+
 async def finish(
     bot: Bot,
     state: FSMContext,
     chat_id: int,
     user: User,
+    session: AsyncSession,
     text: str,
     reply_markup: InlineKeyboardMarkup | None = None,
 ) -> None:
-    """End a scenario: the result goes in a new message, then the main menu (TZ 11).
+    """End a scenario: the result goes in a new message, then the main menu (TZ 13.1).
 
     The scenario is cleared only after the result is delivered: if Telegram fails in
     between, the user can press "Сохранить" again and gets the same record back (the
     request_id makes the repeat safe).
     """
     await bot.send_message(chat_id, text, reply_markup=reply_markup)
-    await bot.send_message(chat_id, texts.MAIN_MENU, reply_markup=main_menu(user))
+    await send_menu(bot, chat_id, user, session)
     await reset_scenario(state, bot, chat_id)
 
 

@@ -1,20 +1,22 @@
 """Direct inserts for test setup (bypassing services where a test needs exact control)."""
 
 import uuid
-from datetime import date, datetime
+from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import CashAdjustment, Client, Operation, User
+from app.db.models import Client, Operation, OperationEntry, User
 from app.domain.currency import Currency
-from app.domain.operations import OperationType
+from app.domain.entries import Book, EntryKind, OperationType
+from app.services import days
 
-DEBT_SIGN = {
-    OperationType.LEND: 1,
-    OperationType.REPAY_IN: -1,
-    OperationType.BORROW: -1,
-    OperationType.REPAY_OUT: 1,
+# The obligation of the client grows for these loan records and shrinks for the others (TZ 6.3).
+LOAN_OBLIGATION_SIGN = {
+    OperationType.LOAN_GIVE: 1,
+    OperationType.LOAN_REPAY_IN: -1,
+    OperationType.LOAN_TAKE: -1,
+    OperationType.LOAN_REPAY_OUT: 1,
 }
 
 
@@ -34,57 +36,49 @@ async def make_client(
     return client
 
 
-async def make_operation(
+async def make_loan(
     session: AsyncSession,
     author: User,
     client: Client,
-    op_type: OperationType,
     amount: str,
-    currency: Currency = Currency.USD,
+    op_type: OperationType = OperationType.LOAN_GIVE,
     *,
-    op_date: date = date(2026, 9, 1),
     created_at: datetime | None = None,
 ) -> Operation:
-    """A same-currency record with deltas by TZ 7.1."""
+    """A som loan record with its two entries, in the open day."""
+    day = await days.ensure_open_day(session)
     value = Decimal(amount)
-    sign = DEBT_SIGN[op_type]
+    sign = LOAN_OBLIGATION_SIGN[op_type]
     operation = Operation(
         request_id=uuid.uuid4(),
+        day_id=day.id,
         type=op_type,
         client_id=client.id,
-        debt_currency=currency,
-        debt_amount=value,
-        cash_currency=currency,
-        cash_amount=value,
-        debt_delta=sign * value,
-        cash_delta=-sign * value,
-        op_date=op_date,
+        currency=Currency.KGS,
+        amount=value,
         author_id=author.id,
     )
     if created_at is not None:
         operation.created_at = created_at
     session.add(operation)
+    await session.flush()
+    session.add_all(
+        [
+            OperationEntry(
+                operation_id=operation.id,
+                kind=EntryKind.CASH,
+                currency=Currency.KGS,
+                delta=-sign * value,
+            ),
+            OperationEntry(
+                operation_id=operation.id,
+                kind=EntryKind.OBLIGATION,
+                currency=Currency.KGS,
+                book=Book.LOAN,
+                client_id=client.id,
+                delta=sign * value,
+            ),
+        ]
+    )
     await session.commit()
     return operation
-
-
-async def make_adjustment(
-    session: AsyncSession,
-    author: User,
-    amount: str,
-    currency: Currency = Currency.USD,
-    *,
-    reason: str = "Остаток на начало работы",
-    adj_date: date = date(2026, 9, 1),
-) -> CashAdjustment:
-    adjustment = CashAdjustment(
-        request_id=uuid.uuid4(),
-        currency=currency,
-        amount=Decimal(amount),
-        reason=reason,
-        adj_date=adj_date,
-        author_id=author.id,
-    )
-    session.add(adjustment)
-    await session.commit()
-    return adjustment

@@ -1,8 +1,9 @@
 import logging
+from typing import Annotated
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import SecretStr, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class DatabaseSettings(BaseSettings):
@@ -15,7 +16,8 @@ class DatabaseSettings(BaseSettings):
 
 class Settings(DatabaseSettings):
     bot_token: SecretStr
-    owner_telegram_id: int
+    # "111111111,222222222": every owner has the same rights (TZ 13.12).
+    owner_telegram_ids: Annotated[tuple[int, ...], NoDecode]
     # Group (or channel) where the bot posts new records; the bot must be a member there.
     group_chat_id: int | None = None
     redis_url: str | None = None
@@ -30,12 +32,26 @@ class Settings(DatabaseSettings):
             return None
         return value
 
-    @field_validator("owner_telegram_id")
+    @field_validator("owner_telegram_ids", mode="before")
     @classmethod
-    def _check_owner_id(cls, value: int) -> int:
-        if value <= 0:
-            raise ValueError("OWNER_TELEGRAM_ID must be a positive Telegram user id")
+    def _parse_owner_ids(cls, value: object) -> object:
+        if isinstance(value, str):
+            value = [part for part in value.replace(" ", "").split(",") if part]
+        elif isinstance(value, int):
+            value = [value]
         return value
+
+    @field_validator("owner_telegram_ids")
+    @classmethod
+    def _check_owner_ids(cls, value: tuple[int, ...]) -> tuple[int, ...]:
+        if not value:
+            raise ValueError(
+                "OWNER_TELEGRAM_IDS is empty: list the Telegram ids of the owners, "
+                "e.g. 111111111,222222222"
+            )
+        if any(owner_id <= 0 for owner_id in value):
+            raise ValueError("OWNER_TELEGRAM_IDS must contain positive Telegram user ids")
+        return tuple(dict.fromkeys(value))  # keep the order, drop repeats
 
     @field_validator("group_chat_id")
     @classmethod

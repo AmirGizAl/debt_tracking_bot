@@ -55,8 +55,6 @@ def client_card(client: Client, can_delete: bool) -> InlineKeyboardMarkup:
         [button(texts.BTN_DELETE, _cb(ClientsAction.DELETE, client.id))] if can_delete else []
     )
     return markup(
-        [button(texts.BTN_HISTORY, _cb(ClientsAction.HISTORY, client.id))],
-        [button(texts.BTN_STATEMENT, _cb(ClientsAction.STATEMENT, client.id))],
         [button(texts.BTN_EDIT, _cb(ClientsAction.EDIT, client.id))],
         delete_row,
         [button(texts.BTN_ALL_CLIENTS, _cb(ClientsAction.LIST)), home_button()],
