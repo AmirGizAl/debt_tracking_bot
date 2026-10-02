@@ -1,4 +1,4 @@
-"""Rate direction and conversion of a payment into the debt currency (TZ 4.5, 4.6).
+"""Rate direction and conversion by a rate (TZ 4.5, 4.6).
 
 A rate is always "1 base = rate quote". Pure functions, no database.
 """
@@ -28,20 +28,18 @@ def rate_pair(first: Currency, second: Currency) -> tuple[Currency, Currency]:
     return base, quote
 
 
-def convert_payment(
-    pay_amount: Decimal, pay_currency: Currency, debt_currency: Currency, rate: Decimal
-) -> Decimal:
-    """How much of the debt a payment covers, rounded half up to cents.
+def convert(known: Decimal, known_currency: Currency, other: Currency, rate: Decimal) -> Decimal:
+    """The amount in `other` for `known` in `known_currency`, rounded half up to cents.
 
-    Paying in the base currency multiplies by the rate, paying in the quote divides.
+    A known amount in the base currency is multiplied by the rate, in the quote one divided.
     """
-    base, _quote = rate_pair(pay_currency, debt_currency)
+    base, _quote = rate_pair(known_currency, other)
     with localcontext() as context:
         context.prec = _PRECISION
-        raw = pay_amount * rate if pay_currency == base else pay_amount / rate
-        debt_amount = raw.quantize(CENT, rounding=ROUND_HALF_UP)
-    if debt_amount == 0:
+        raw = known * rate if known_currency == base else known / rate
+        result = raw.quantize(CENT, rounding=ROUND_HALF_UP)
+    if result == 0:
         raise InvalidConversion(ConversionProblem.ZERO)
-    if debt_amount > MAX_AMOUNT:
+    if result > MAX_AMOUNT:
         raise InvalidConversion(ConversionProblem.TOO_LARGE)
-    return debt_amount
+    return result

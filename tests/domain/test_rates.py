@@ -6,7 +6,7 @@ import pytest
 from app.bot.texts import rate_question
 from app.domain.currency import Currency
 from app.domain.errors import ConversionProblem, InvalidConversion
-from app.domain.rates import convert_payment, rate_pair
+from app.domain.rates import convert, rate_pair
 
 KGS, USD, EUR, RUB, KZT = Currency.KGS, Currency.USD, Currency.EUR, Currency.RUB, Currency.KZT
 
@@ -43,42 +43,43 @@ def test_rate_pair_needs_two_currencies() -> None:
         rate_pair(USD, USD)
 
 
-# TZ 4.6 control examples: (debt currency, payment, payment currency, rate) -> debt amount.
+# TZ 4.6 control examples: (known amount, its currency, rate) -> the other amount.
 @pytest.mark.parametrize(
-    ("debt", "pay", "pay_currency", "rate", "expected"),
+    ("known", "known_currency", "other", "rate", "expected"),
     [
-        (USD, "52500", KGS, "87.5", "600"),
-        (RUB, "300", USD, "90", "27000"),
-        (USD, "1000", KGS, "87.5", "11.43"),
-        (USD, "900", EUR, "1.1", "990"),
-        (KGS, "100000", KZT, "0.17", "17000"),
+        ("1000", USD, KGS, "87", "87000"),
+        ("88000", KGS, USD, "88", "1000"),
+        ("88500", RUB, USD, "88.5", "1000"),
+        ("1000", KGS, USD, "87.5", "11.43"),
+        ("900", EUR, USD, "1.1", "990"),
+        ("100000", KZT, KGS, "0.17", "17000"),
     ],
 )
-def test_convert_payment_examples(
-    debt: Currency, pay: str, pay_currency: Currency, rate: str, expected: str
+def test_convert_examples(
+    known: str, known_currency: Currency, other: Currency, rate: str, expected: str
 ) -> None:
-    result = convert_payment(Decimal(pay), pay_currency, debt, Decimal(rate))
+    result = convert(Decimal(known), known_currency, other, Decimal(rate))
     assert result == Decimal(expected)
     assert result.as_tuple().exponent == -2
 
 
 def test_conversion_rounds_half_up() -> None:
     # 0.01 / 2 = 0.005 -> 0.01 (banker's rounding would give 0.00).
-    assert convert_payment(Decimal("0.01"), KGS, USD, Decimal("2")) == Decimal("0.01")
+    assert convert(Decimal("0.01"), KGS, USD, Decimal("2")) == Decimal("0.01")
     # 1.00 / 0.8 = 1.25 exactly stays, 1.00 / 3 = 0.333.. -> 0.33, 2 / 3 = 0.666.. -> 0.67
-    assert convert_payment(Decimal("1"), KGS, USD, Decimal("3")) == Decimal("0.33")
-    assert convert_payment(Decimal("2"), KGS, USD, Decimal("3")) == Decimal("0.67")
+    assert convert(Decimal("1"), KGS, USD, Decimal("3")) == Decimal("0.33")
+    assert convert(Decimal("2"), KGS, USD, Decimal("3")) == Decimal("0.67")
 
 
 def test_conversion_to_zero_is_an_input_error() -> None:
     with pytest.raises(InvalidConversion) as error:
-        convert_payment(Decimal("0.01"), KGS, USD, Decimal("3"))
+        convert(Decimal("0.01"), KGS, USD, Decimal("3"))
     assert error.value.problem == ConversionProblem.ZERO
 
 
 def test_conversion_above_the_maximum_is_an_input_error() -> None:
     with pytest.raises(InvalidConversion) as error:
-        convert_payment(Decimal("999999999999.99"), USD, KGS, Decimal("1000"))
+        convert(Decimal("999999999999.99"), USD, KGS, Decimal("1000"))
     assert error.value.problem == ConversionProblem.TOO_LARGE
 
 
@@ -109,4 +110,4 @@ def test_conversion_is_exact_for_large_values(
     exact = (
         Fraction(pay) * Fraction(rate) if pay_currency == base else Fraction(pay) / Fraction(rate)
     )
-    assert convert_payment(Decimal(pay), pay_currency, debt, Decimal(rate)) == _exact_half_up(exact)
+    assert convert(Decimal(pay), pay_currency, debt, Decimal(rate)) == _exact_half_up(exact)
