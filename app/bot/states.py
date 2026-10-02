@@ -47,3 +47,16 @@ class LoanFlow(StatesGroup):
     amount = State()  # the client is chosen before, with the client picker
     comment = State()
     confirm = State()
+
+
+class ReversalFlow(StatesGroup):
+    reason = State()
+    confirm = State()
+
+
+class AdjustFlow(StatesGroup):
+    currency = State()
+    direction = State()
+    amount = State()
+    reason = State()
+    confirm = State()

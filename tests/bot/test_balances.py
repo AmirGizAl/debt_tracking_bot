@@ -53,7 +53,6 @@ async def test_balances_screen(
         texts.BTN_ADJUST,
         texts.BTN_HOME,
     ]
-    assert await owner_client.click(texts.BTN_ADJUST) == texts.SECTION_SOON
 
 
 async def test_helper_sees_balances_without_adjustment(

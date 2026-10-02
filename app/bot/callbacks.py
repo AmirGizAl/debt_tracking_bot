@@ -184,3 +184,43 @@ class LoansCb(CallbackData, prefix="ln"):
     action: LoansAction
     op_type: OperationType | None = None
     page: int = 0
+
+
+class RecordSource(StrEnum):
+    """The list a record card was opened from: its «Назад» leads there."""
+
+    DAY = "d"  # «Записи дня»
+    HISTORY = "h"  # «История записей» of a client
+
+
+class RecordAction(StrEnum):
+    OPEN = "open"  # a view: always valid
+    CANCEL = "cancel"  # «Отменить запись»: starts the cancellation
+    CONFIRM = "ok"  # «Да, отменить»
+    BACK = "back"
+
+
+class RecordCb(CallbackData, prefix="rc"):
+    """The record card and its cancellation (TZ 11, 13.8). Not "r": that prefix is retired."""
+
+    action: RecordAction
+    record_id: int = 0
+    source: RecordSource | None = None
+    client_id: int = 0  # the client of the history the card was opened from
+    page: int = 0
+
+
+class AdjustAction(StrEnum):
+    CURRENCY = "cur"  # currency
+    DIRECTION = "dir"  # adding
+    SAVE = "save"
+    DONT_SAVE = "no"
+    BACK = "back"
+
+
+class AdjustCb(CallbackData, prefix="ad"):
+    """Steps of an adjustment (TZ 10); valid only on the current scenario screen."""
+
+    action: AdjustAction
+    currency: Currency | None = None
+    adding: bool = True

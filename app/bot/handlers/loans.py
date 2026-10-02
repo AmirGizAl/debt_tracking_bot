@@ -15,11 +15,13 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.bot import texts
+from app.bot import changes, texts
 from app.bot.callbacks import LoansAction, LoansCb, MenuAction, MenuCb
 from app.bot.flows import client_picker, records
 from app.bot.flows.records import Event, StoredForm
 from app.bot.keyboards import loans as kb
+from app.bot.keyboards.records import open_record
+from app.bot.notify import post_record
 from app.bot.states import LoanFlow
 from app.bot.ui import (
     OnScreen,
@@ -32,6 +34,7 @@ from app.bot.ui import (
     show_screen,
     show_step,
 )
+from app.config import Settings
 from app.db.models import Client, User
 from app.domain import errors
 from app.domain.currency import HOME_CURRENCY
@@ -162,7 +165,7 @@ async def show_confirm(
         form.client_name,
         form.amount,
         form.comment,
-        await records.after_lines(session, draft, form.client_name, obligations_first=True),
+        await changes.after_lines(session, draft, form.client_name, obligations_first=True),
         texts.warning_text(warning, HOME_CURRENCY) if warning is not None else None,
     )
     await state.set_state(LoanFlow.confirm)
@@ -296,7 +299,12 @@ async def skip_comment(
 
 @router.callback_query(LoanFlow.confirm, _step(LoansAction.SAVE), OnScreen())
 async def save(
-    callback: CallbackQuery, state: FSMContext, bot: Bot, session: AsyncSession, user: User
+    callback: CallbackQuery,
+    state: FSMContext,
+    bot: Bot,
+    session: AsyncSession,
+    user: User,
+    settings: Settings,
 ) -> None:
     form = await _form(callback, state, bot, session, user)
     if form is None:
@@ -305,7 +313,7 @@ async def save(
     await answer(callback)
     chat_id = chat_id_of(callback)
     try:
-        record, _created = await loans.create_loan(
+        record, created = await loans.create_loan(
             session,
             user,
             uuid.UUID(form.request_id),
@@ -322,7 +330,11 @@ async def save(
         text = f"{texts.CLIENT_NOT_FOUND}\n{texts.RECORD_NOT_SAVED}"
         await finish(bot, state, chat_id, user, session, text)
         return
-    await finish(bot, state, chat_id, user, session, texts.record_saved(record.id))
+    await finish(
+        bot, state, chat_id, user, session, texts.record_saved(record.id), open_record(record.id)
+    )
+    if created:
+        await post_record(bot, settings, session, record.id)
 
 
 @router.callback_query(LoanFlow.confirm, _step(LoansAction.DONT_SAVE), OnScreen())

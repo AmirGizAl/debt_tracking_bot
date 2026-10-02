@@ -11,8 +11,10 @@ from aiogram.exceptions import TelegramAPIError, TelegramMigrateToChat
 from aiogram.types import InlineKeyboardMarkup
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.bot import changes, texts
 from app.config import Settings
-from app.services import users
+from app.domain.entries import LOAN_TYPES
+from app.services import ledger, users
 
 logger = logging.getLogger(__name__)
 
@@ -53,3 +55,24 @@ async def notify_group(bot: Bot, settings: Settings, text: str) -> None:
             await bot.send_message(exc.migrate_to_chat_id, text)
     except TelegramAPIError as exc:
         logger.warning("Cannot post to the group %s: %s", chat_id, exc)
+
+
+async def post_record(bot: Bot, settings: Settings, session: AsyncSession, record_id: int) -> None:
+    """A new record or a cancellation, with the balances and obligations it changed."""
+    if settings.group_chat_id is None:
+        return
+    try:
+        operation = await ledger.get_operation(session, record_id)
+        client_name = operation.client.name if operation.client is not None else None
+        after = await changes.state_lines(
+            session,
+            operation.entries,
+            operation.client_id,
+            client_name,
+            pending=False,
+            obligations_first=operation.type in LOAN_TYPES,
+        )
+    except Exception:
+        logger.exception("Cannot prepare the group post about record %s", record_id)
+        return
+    await notify_group(bot, settings, texts.group_record_notice(operation, after, settings.zone))

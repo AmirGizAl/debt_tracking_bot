@@ -160,15 +160,12 @@ async def test_card_shows_obligations_of_both_books(
     )
 
 
-async def test_history_and_statement_come_later(
-    owner_client: UserClient, session: AsyncSession
-) -> None:
+async def test_statement_comes_later(owner_client: UserClient, session: AsyncSession) -> None:
     await make_client(session, await owner_user(session), "Иван")
     await open_clients(owner_client)
     await owner_client.click("Иван")
 
-    for button in (texts.BTN_HISTORY, texts.BTN_STATEMENT):
-        assert await owner_client.click(button) == texts.SECTION_SOON
+    assert await owner_client.click(texts.BTN_STATEMENT) == texts.SECTION_SOON
 
 
 async def test_rename_and_edit_comment(owner_client: UserClient, session: AsyncSession) -> None:

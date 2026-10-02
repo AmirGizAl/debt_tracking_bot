@@ -109,11 +109,9 @@ async def open_client(
     await answer(callback)
 
 
-@router.callback_query(_action(ClientsAction.HISTORY))
 @router.callback_query(_action(ClientsAction.STATEMENT))
 async def coming_soon(callback: CallbackQuery) -> None:
-    # «История записей» comes with the record card (stage 6), «Выписка» with the reports
-    # (stage 8 of docs/V2_PLAN.md).
+    # «Выписка» comes with the reports (stage 8 of docs/V2_PLAN.md).
     await answer(callback, texts.SECTION_SOON)
 
 

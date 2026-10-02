@@ -1,8 +1,4 @@
-"""Notifications to the group of GROUP_CHAT_ID (customer's request, kept for version 2).
-
-Posts about records come with the record scenarios of version 2 (docs/V2_PLAN.md, stage 6);
-helper events and the discovery of the group id work already.
-"""
+"""Notifications to the group of GROUP_CHAT_ID (customer's request, kept for version 2)."""
 
 import logging
 
@@ -17,7 +13,9 @@ from app.config import Settings
 from app.db.models import User
 from app.services import users
 from tests.bot.harness import BOT_TOKEN, FakeTelegram, Harness, UserClient
+from tests.bot.steps import records, save
 from tests.conftest import OWNER_TG_ID, SECOND_OWNER_TG_ID
+from tests.factories import make_client
 
 GROUP = -1001234567890
 
@@ -53,6 +51,128 @@ async def test_helper_events_are_posted(
         "Помощник @aigul_k удалён.",
     ]
     assert all(post.markup is None for post in harness.chat(group))
+
+
+def lines_without_author(text: str) -> list[str]:
+    return [line for line in text.splitlines() if not line.startswith("Автор: ")]
+
+
+async def instant_sale(client: UserClient) -> None:
+    """1 000 USD for som at 87 through the bot, up to the confirmation."""
+    await client.send("/menu")
+    await client.click(texts.BTN_EXCHANGE)
+    await client.click("USD")
+    await client.click("KGS")
+    await client.send("1000")
+    await client.send("87")
+    await client.click(texts.BTN_MODE_NOW)
+
+
+async def test_new_records_and_cancellations_are_posted(
+    harness: Harness, owner_client: UserClient, session: AsyncSession, funded: User, group: int
+) -> None:
+    await instant_sale(owner_client)
+    await save(owner_client)
+    await owner_client.click(texts.BTN_OPEN_RECORD)
+    await owner_client.click(texts.BTN_CANCEL_RECORD)
+    await owner_client.send("дубль")
+    await owner_client.click(texts.BTN_CONFIRM_CANCEL)
+
+    sale, cancellation = harness.chat(group)
+    assert lines_without_author(sale.text) == [
+        "Новая запись №3 · Обмен",
+        "Клиент: без имени",
+        "Клиент отдаёт: 1 000 USD — получено",
+        "Клиент получает: 87 000 KGS — выдано",
+        "Курс: 1 USD = 87 KGS",
+        "",
+        "После записи:",
+        "Баланс USD: 11 000",
+        "Наличка: 913 000 KGS",
+    ]
+    assert "Автор: Владелец" in sale.text
+    assert lines_without_author(cancellation.text) == [
+        "Новая запись №4 · отмена записи №3",
+        "Обмен · без имени · 1 000 USD → 87 000 KGS",
+        "Причина: дубль",
+        "",
+        "После отмены:",
+        "Баланс USD: 10 000",
+        "Наличка: 1 000 000 KGS",
+    ]
+    assert all(post.markup is None for post in harness.chat(group))
+
+
+async def test_loans_and_adjustments_are_posted(
+    harness: Harness, owner_client: UserClient, session: AsyncSession, funded: User, group: int
+) -> None:
+    await make_client(session, funded, "Бекзат")
+    await owner_client.send("/menu")
+    await owner_client.click(texts.BTN_LOANS)
+    await owner_client.click(texts.BTN_LOAN_GIVE)
+    await owner_client.click("Бекзат")
+    await owner_client.send("50000")
+    await owner_client.send("до пятницы")
+    await save(owner_client)
+    await owner_client.click(texts.BTN_BALANCES)
+    await owner_client.click(texts.BTN_ADJUST)
+    await owner_client.click("USD")
+    await owner_client.click(texts.BTN_ADJUST_REMOVE)
+    await owner_client.send("500")
+    await owner_client.send("пересчёт кассы")
+    await save(owner_client)
+
+    loan_post, adjustment_post = harness.chat(group)
+    assert lines_without_author(loan_post.text) == [
+        "Новая запись №3 · Выдал в долг",
+        "Клиент: Бекзат",
+        "Сумма: 50 000 KGS",
+        "Комментарий: до пятницы",
+        "",
+        "После записи:",
+        "Бекзат: должен нам 50 000 KGS (долг в сомах)",
+        "Наличка: 950 000 KGS",
+    ]
+    assert lines_without_author(adjustment_post.text) == [
+        "Новая запись №4 · Корректировка",
+        "Сумма: −500 USD",
+        "Причина: пересчёт кассы",
+        "",
+        "После записи:",
+        "Баланс USD: 9 500",
+    ]
+
+
+async def test_a_record_is_posted_once(
+    harness: Harness, owner_client: UserClient, session: AsyncSession, funded: User, group: int
+) -> None:
+    await instant_sale(owner_client)
+    confirmation = owner_client.last
+    data = confirmation.callback_data(texts.BTN_SAVE)
+    assert data is not None
+
+    await owner_client.press(data, confirmation)
+    await owner_client.press(data, confirmation)
+
+    assert len(harness.chat(group)) == 1
+
+
+async def test_unreachable_group_keeps_the_record(
+    harness: Harness,
+    owner_client: UserClient,
+    session: AsyncSession,
+    funded: User,
+    group: int,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    harness.telegram.unreachable_chats.add(group)
+    await instant_sale(owner_client)
+
+    with caplog.at_level(logging.WARNING):
+        assert await save(owner_client) == "Запись №3 сохранена."
+
+    assert await records(session) == 3
+    assert f"Cannot post to the group {group}" in caplog.text
 
 
 async def test_every_owner_hears_about_a_new_helper(

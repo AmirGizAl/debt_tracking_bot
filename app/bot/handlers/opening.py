@@ -16,6 +16,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.bot import texts
 from app.bot.callbacks import OpeningAction, OpeningCb
 from app.bot.keyboards import opening as kb
+from app.bot.keyboards.records import open_record
+from app.bot.notify import post_record
 from app.bot.states import OpeningFlow
 from app.bot.ui import (
     OnScreen,
@@ -27,6 +29,7 @@ from app.bot.ui import (
     not_saved,
     show_step,
 )
+from app.config import Settings
 from app.db.models import User
 from app.domain import errors
 from app.domain.currency import CURRENCIES, Currency
@@ -148,13 +151,18 @@ async def receive_amount(
 
 @router.callback_query(OpeningFlow.confirm, _step(OpeningAction.SAVE), OnScreen())
 async def save(
-    callback: CallbackQuery, state: FSMContext, bot: Bot, session: AsyncSession, user: User
+    callback: CallbackQuery,
+    state: FSMContext,
+    bot: Bot,
+    session: AsyncSession,
+    user: User,
+    settings: Settings,
 ) -> None:
     await answer(callback)
     data = await state.get_data()
     currency, chat_id = Currency(data["currency"]), chat_id_of(callback)
     try:
-        record, _created = await opening.create_opening(
+        record, created = await opening.create_opening(
             session, user, uuid.UUID(data["request_id"]), currency, Decimal(data["amount"])
         )
     except errors.OpeningExists:
@@ -165,7 +173,11 @@ async def save(
         text = f"{texts.OPENING_FROZEN}\n{texts.RECORD_NOT_SAVED}"
         await finish(bot, state, chat_id, user, session, text)
         return
-    await finish(bot, state, chat_id, user, session, texts.record_saved(record.id))
+    await finish(
+        bot, state, chat_id, user, session, texts.record_saved(record.id), open_record(record.id)
+    )
+    if created:
+        await post_record(bot, settings, session, record.id)
 
 
 @router.callback_query(OpeningFlow.confirm, _step(OpeningAction.DONT_SAVE), OnScreen())

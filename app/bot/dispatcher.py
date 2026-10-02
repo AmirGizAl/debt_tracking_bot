@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.bot import texts
 from app.bot.handlers import (
+    adjustments,
     balances,
     client_picker,
     clients,
@@ -25,6 +26,7 @@ from app.bot.handlers import (
     menu,
     opening,
     panel,
+    records,
     settlements,
     start,
 )
@@ -98,6 +100,8 @@ def create_dispatcher(
         exchange.router,
         settlements.router,
         loans.router,
+        records.router,
+        adjustments.router,
         balances.router,
         fallback.router,
     )
