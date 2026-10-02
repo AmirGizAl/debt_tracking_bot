@@ -45,3 +45,12 @@ def settlement_warning(
         if balance < amount:
             return RecordWarning(WarningKind.MORE_THAN_OWED, amount - balance)
     return None
+
+
+def settling_amount(op_type: OperationType, balance: Decimal) -> Decimal | None:
+    """The amount that brings the obligation to zero («Всю сумму»), if the record settles it."""
+    if op_type in PAYING_OUT and balance < 0:
+        return -balance
+    if op_type in TAKING_IN and balance > 0:
+        return balance
+    return None

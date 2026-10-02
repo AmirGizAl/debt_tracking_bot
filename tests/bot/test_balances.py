@@ -8,6 +8,7 @@ from app.bot.callbacks import OpeningAction, OpeningCb
 from app.db.models import Operation, User
 from app.services import ledger, opening
 from tests.bot.harness import Harness, UserClient
+from tests.bot.steps import save
 from tests.conftest import create_user
 from tests.services.accounting import (
     EUR,
@@ -20,14 +21,6 @@ from tests.services.accounting import (
     force_close_day,
     open_balance,
 )
-
-
-async def save(client: UserClient) -> str:
-    """Press «Сохранить»; returns the result message (the menu follows it)."""
-    await client.click(texts.BTN_SAVE)
-    result, menu = client.bot_messages[-2:]
-    assert menu.text == texts.main_menu(1)
-    return result.text
 
 
 async def open_opening(client: UserClient) -> None:

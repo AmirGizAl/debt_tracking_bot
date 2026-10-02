@@ -6,9 +6,8 @@ Every renderer sets the state it shows, so "Назад" is computed from the sta
 """
 
 import uuid
-from dataclasses import asdict, dataclass, fields
+from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any
 
 from aiogram import Bot
 from aiogram.fsm.context import FSMContext
@@ -17,14 +16,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.bot import texts
 from app.bot.callbacks import ExchangeAction
-from app.bot.flows import client_picker
+from app.bot.flows import client_picker, records
+from app.bot.flows.records import StoredForm
 from app.bot.keyboards import exchange as kb
 from app.bot.states import ExchangeFlow
 from app.bot.ui import leave_any, show_step
-from app.domain.currency import CURRENCIES, Currency
-from app.domain.entries import Book, ExchangeTerms, exchange_cash_changes, exchange_draft
+from app.domain.currency import Currency
+from app.domain.entries import ExchangeTerms, exchange_draft
 from app.domain.rates import rate_pair
-from app.services import exchange, ledger
+from app.services import exchange
 
 Event = Message | CallbackQuery
 
@@ -40,8 +40,8 @@ MODES = {
 
 
 @dataclass
-class Form:
-    """Everything entered so far; stored in FSM data as plain strings (RedisStorage is JSON)."""
+class Form(StoredForm):
+    """Everything entered so far."""
 
     request_id: str
     give_currency: Currency | None = None
@@ -103,32 +103,6 @@ class Form:
             paid_now=self.paid_now,
             rate=None if self.same_currency else self.rate,
         )
-
-    def dump(self) -> dict[str, Any]:
-        result: dict[str, Any] = {}
-        for key, value in asdict(self).items():
-            result[key] = str(value) if isinstance(value, Decimal | Currency) else value
-        return result
-
-    @classmethod
-    def load(cls, data: dict[str, Any]) -> "Form | None":
-        if "request_id" not in data or "side" not in data:
-            return None
-        converters: dict[str, Any] = {
-            "give_currency": Currency,
-            "get_currency": Currency,
-            "give_amount": Decimal,
-            "get_amount": Decimal,
-            "rate": Decimal,
-        }
-        values = {}
-        for field in fields(cls):
-            value = data.get(field.name)
-            if value is not None and field.name in converters:
-                value = converters[field.name](value)
-            if value is not None:
-                values[field.name] = value
-        return cls(**values)
 
 
 async def load(state: FSMContext) -> Form | None:
@@ -246,28 +220,8 @@ async def show_client_step(
 
 async def after_lines(session: AsyncSession, form: Form) -> list[str]:
     """«После сохранения»: the balances and the client's obligations this exchange changes."""
-    terms = form.terms()
-    result = []
-    for currency, change in sorted(
-        exchange_cash_changes(terms).items(), key=lambda item: CURRENCIES.index(item[0])
-    ):
-        if change != 0:
-            current = await ledger.balance(session, currency)
-            result.append(texts.balance_after(currency, current + change))
-    if form.client_id is not None and not form.instant:
-        changes: dict[Currency, Decimal] = {}
-        for entry in exchange_draft(terms, form.client_id).entries:
-            if entry.book == Book.EXCHANGE:
-                changes[entry.currency] = changes.get(entry.currency, Decimal(0)) + entry.delta
-        for currency in sorted(changes, key=CURRENCIES.index):
-            current = await ledger.obligation(session, form.client_id, Book.EXCHANGE, currency)
-            assert form.client_name is not None
-            result.append(
-                texts.obligation_line(
-                    form.client_name, Book.EXCHANGE, currency, current + changes[currency]
-                )
-            )
-    return result
+    draft = exchange_draft(form.terms(), form.client_id)
+    return await records.after_lines(session, draft, form.client_name)
 
 
 async def show_confirm(

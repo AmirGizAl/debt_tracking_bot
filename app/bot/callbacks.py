@@ -9,6 +9,9 @@ from enum import StrEnum
 
 from aiogram.filters.callback_data import CallbackData
 
+from app.domain.currency import Currency
+from app.domain.entries import OperationType
+
 
 class MenuAction(StrEnum):
     HOME = "home"
@@ -59,6 +62,8 @@ class ClientsAction(StrEnum):
     CLEAR_COMMENT = "cc"
     DELETE = "dl"
     CONFIRM_DELETE = "dk"
+    HISTORY = "hs"  # «История записей» (same value as in version 1: same meaning)
+    STATEMENT = "st"  # «Выписка»
 
 
 class ClientsCb(CallbackData, prefix="c"):
@@ -129,3 +134,53 @@ class PickCb(CallbackData, prefix="cp"):
 
     action: PickAction
     value: str = ""
+
+
+class WaitingCb(CallbackData, prefix="w"):
+    """A page of «Ждут выдачи» (`paying`) or «Ждут оплаты»; a view, always valid."""
+
+    paying: bool
+    page: int = 0
+
+
+class SettleAction(StrEnum):
+    START = "go"  # a row of a waiting list: client, currency, paying, page of the list
+    FROM_CARD = "card"  # «Выдать» / «Получить» on the client card: client, paying
+    CURRENCY = "cur"  # currency
+    WHOLE = "all"  # «Всю сумму»
+    SAVE = "save"
+    DONT_SAVE = "no"
+    BACK = "back"
+
+
+class SettleCb(CallbackData, prefix="st"):
+    """Payouts and receipts of exchange obligations (TZ 13.4).
+
+    START and FROM_CARD begin a scenario from a view; the other steps are valid only on the
+    current scenario screen.
+    """
+
+    action: SettleAction
+    paying: bool = True
+    client_id: int = 0
+    currency: Currency | None = None
+    page: int = 0
+
+
+class LoansAction(StrEnum):
+    SHOW = "show"
+    START = "go"  # op_type
+    WHO_OWES = "who"  # page
+    WHOLE = "all"  # «Всю сумму»
+    SKIP_COMMENT = "skip"
+    SAVE = "save"
+    DONT_SAVE = "no"
+    BACK = "back"
+
+
+class LoansCb(CallbackData, prefix="ln"):
+    """«Долги в сомах» (TZ 13.5); scenario steps are valid only on the current screen."""
+
+    action: LoansAction
+    op_type: OperationType | None = None
+    page: int = 0

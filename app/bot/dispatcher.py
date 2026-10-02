@@ -21,9 +21,11 @@ from app.bot.handlers import (
     exchange,
     fallback,
     group,
+    loans,
     menu,
     opening,
     panel,
+    settlements,
     start,
 )
 from app.bot.handlers import settings as settings_handlers
@@ -94,6 +96,8 @@ def create_dispatcher(
         clients.router,
         client_picker.router,
         exchange.router,
+        settlements.router,
+        loans.router,
         balances.router,
         fallback.router,
     )

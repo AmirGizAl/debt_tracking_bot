@@ -11,9 +11,10 @@ from html import escape
 from app.db.models import Client, User, UserStatus
 from app.domain.currency import HOME_CURRENCY, Currency
 from app.domain.dates import format_date
-from app.domain.entries import Book
+from app.domain.entries import Book, OperationType
 from app.domain.errors import ConversionProblem, InsufficientBalance, NumberProblem
 from app.domain.money import format_amount, format_money, format_rate
+from app.domain.warnings import RecordWarning, WarningKind
 
 
 def esc(value: object) -> str:
@@ -58,6 +59,16 @@ ACTION_CANCELLED = "Действие отменено."
 PERMISSION_DENIED = "Недостаточно прав для этого действия."
 UNEXPECTED_INPUT = "Не понял сообщение. Воспользуйтесь кнопками выше или нажмите /menu."
 UNEXPECTED_ERROR = "Произошла ошибка. Попробуйте ещё раз или нажмите /menu."
+
+
+def step_text(title: str, lines: list[str], question: str, problem: str | None = None) -> str:
+    """A scenario step: what is known so far, the problem with the last input, the question."""
+    parts = ["\n".join([title, *lines])]
+    if problem:
+        parts.append(problem)
+    parts.append(f"<b>{question}</b>")
+    return "\n\n".join(parts)
+
 
 # --- Access ---------------------------------------------------------------------------------
 
@@ -172,6 +183,9 @@ BTN_CLEAR_COMMENT = "Удалить комментарий"
 BTN_SKIP = "Пропустить"
 BTN_ALL_CLIENTS = "‹ Все клиенты"
 BTN_OPEN_CLIENT = "Открыть клиента"
+BTN_HISTORY = "История записей"
+BTN_STATEMENT = "Выписка"
+NO_OBLIGATIONS = "Обязательств нет"
 
 ASK_SEARCH = "Введите часть имени клиента:"
 ASK_CLIENT_NAME = "Введите имя клиента:"
@@ -205,15 +219,33 @@ def search_results(query: str, total: int) -> str:
     )
 
 
+def client_line(name: str) -> str:
+    return f"Клиент: {esc(name)}"
+
+
 def client_added(name: str) -> str:
     return f"Клиент «{esc(name)}» добавлен."
 
 
-def client_card(client: Client) -> str:
-    lines = [f"<b>{esc(client.name)}</b>"]
+def client_card(client: Client, obligations: dict[tuple[Book, Currency], Decimal]) -> str:
+    """TZ 13.6: zero lines are not shown; with nothing at all, «Обязательств нет»."""
+    head = [f"<b>{esc(client.name)}</b>"]
     if client.comment:
-        lines.append(f"Комментарий: {esc(client.comment)}")
-    return "\n".join(lines)
+        head.append(f"Комментарий: {esc(client.comment)}")
+    blocks = ["\n".join(head)]
+    exchange = [
+        f"{currency}: {owe_text(amount)}"
+        for (book, currency), amount in obligations.items()
+        if book == Book.EXCHANGE and amount != 0
+    ]
+    if exchange:
+        blocks.append("\n".join(["По обменам:", *exchange]))
+    loan = obligations.get((Book.LOAN, HOME_CURRENCY), Decimal(0))
+    if loan != 0:
+        blocks.append(f"Долг в сомах: {owe_text(loan)}")
+    if len(blocks) == 1:
+        blocks.append(NO_OBLIGATIONS)
+    return "\n\n".join(blocks)
 
 
 def edit_client(name: str) -> str:
@@ -304,7 +336,7 @@ def balance_name(currency: Currency) -> str:
     return CASH_NAME if currency == HOME_CURRENCY else f"Баланс {currency}"
 
 
-def balance_after(currency: Currency, value: Decimal) -> str:
+def balance_line(currency: Currency, value: Decimal) -> str:
     """ "Баланс RUB: 88 500" / "Наличка: 913 000 KGS"."""
     if currency == HOME_CURRENCY:
         return f"{CASH_NAME}: {format_money(value, currency)}"
@@ -319,6 +351,13 @@ def balances_screen(day_number: int, balances: dict[Currency, Decimal]) -> str:
         else:
             lines.append(f"{currency}: {format_amount(value)}")
     return "\n".join(lines)
+
+
+def owe_text(amount: Decimal) -> str:
+    """ "должен нам 5 000" / "мы должны 1 000": the sign of an obligation in words."""
+    if amount > 0:
+        return f"должен нам {format_amount(amount)}"
+    return f"мы должны {format_amount(-amount)}"
 
 
 def obligation_line(name: str, book: Book, currency: Currency, amount: Decimal) -> str:
@@ -394,7 +433,7 @@ def confirm_opening(currency: Currency, amount: Decimal, balance: Decimal) -> st
             f"Сумма: {format_money(amount, currency)}",
             "",
             "<b>После сохранения:</b>",
-            balance_after(currency, balance),
+            balance_line(currency, balance),
         ]
     )
 
@@ -458,11 +497,7 @@ def exchange_line(
 
 
 def exchange_step(line: str, question: str, problem: str | None = None) -> str:
-    parts = [f"{EXCHANGE_TITLE}\n{line}"]
-    if problem:
-        parts.append(problem)
-    parts.append(f"<b>{question}</b>")
-    return "\n\n".join(parts)
+    return step_text(EXCHANGE_TITLE, [line], question, problem)
 
 
 def give_status(received_now: bool) -> str:
@@ -504,6 +539,186 @@ def confirm_exchange(
 def ask_edit_amount(currency: Currency, gets: bool) -> str:
     who = "получает" if gets else "отдаёт"
     return f"Сколько клиент {who} ({currency})? Введите новую сумму:"
+
+
+# --- Warnings (TZ 6.6) --------------------------------------------------------------------------
+
+
+def warning_text(warning: RecordWarning, currency: Currency) -> str:
+    excess = format_money(warning.excess, currency) if warning.excess is not None else ""
+    match warning.kind:
+        case WarningKind.NOTHING_WE_OWE:
+            return (
+                f"Внимание: мы ничего не должны клиенту в {currency}. "
+                "Вся сумма станет долгом клиента перед нами."
+            )
+        case WarningKind.MORE_THAN_WE_OWE:
+            return (
+                "Внимание: сумма больше нашего долга. "
+                f"Лишние {excess} станут долгом клиента перед нами."
+            )
+        case WarningKind.NOTHING_OWED_TO_US:
+            return (
+                f"Внимание: клиент ничего не должен нам в {currency}. "
+                "Вся сумма станет нашим долгом перед ним."
+            )
+        case WarningKind.MORE_THAN_OWED:
+            return (
+                "Внимание: сумма больше долга клиента. "
+                f"Лишние {excess} станут нашим долгом перед ним."
+            )
+
+
+def btn_whole_amount(amount: Decimal, currency: Currency) -> str:
+    """ "Всю сумму: 1 000 USD": the amount that settles the obligation."""
+    return f"Всю сумму: {format_money(amount, currency)}"
+
+
+# --- «Ждут выдачи» and «Ждут оплаты» (TZ 13.4) ---------------------------------------------------
+
+TO_PAY_TITLE = "<b>Ждут выдачи</b>"
+TO_RECEIVE_TITLE = "<b>Ждут оплаты</b>"
+TO_PAY_EMPTY = "Сейчас никто не ждёт выдачи."
+TO_RECEIVE_EMPTY = "Сейчас никто не должен нам по обменам."
+TO_PAY_HINT = "Нажмите на строку, чтобы выдать."
+TO_RECEIVE_HINT = "Нажмите на строку, чтобы получить."
+PAYOUT_TITLE = "<b>Выдача по обмену</b>"
+RECEIPT_TITLE = "<b>Получение по обмену</b>"
+BTN_GIVE_OUT = "Выдать"
+BTN_TAKE_IN = "Получить"
+ASK_SETTLE_CURRENCY = "В какой валюте?"
+
+
+def waiting_list(paying: bool, totals: dict[Currency, Decimal]) -> str:
+    """The title and the total of every currency above the rows (TZ 13.4)."""
+    title = TO_PAY_TITLE if paying else TO_RECEIVE_TITLE
+    if not totals:
+        return f"{title}\n{TO_PAY_EMPTY if paying else TO_RECEIVE_EMPTY}"
+    lines = [title, "Итого:"]
+    lines += [f"{currency}: {format_amount(total)}" for currency, total in totals.items()]
+    return "\n".join([*lines, "", TO_PAY_HINT if paying else TO_RECEIVE_HINT])
+
+
+def waiting_button(name: str, amount: Decimal, currency: Currency) -> str:
+    """ "Азамат · 1 000 USD" (button texts are not HTML)."""
+    return f"{name} · {format_money(amount, currency)}"
+
+
+def settle_currency_button(currency: Currency, obligation: Decimal) -> str:
+    """ "USD · мы должны 1 000" / "RUB · должен нам 5 000" / "EUR"."""
+    return f"{currency} · {owe_text(obligation)}" if obligation != 0 else str(currency)
+
+
+def ask_settle_amount(paying: bool, client_name: str, currency: Currency) -> str:
+    """Names are not declined (TZ 13.1): "Сколько выдаём клиенту Азамат (USD)?"."""
+    if paying:
+        return f"Сколько выдаём клиенту {esc(client_name)} ({currency})?"
+    return f"Сколько получаем от клиента {esc(client_name)} ({currency})?"
+
+
+def confirm_settlement(
+    paying: bool,
+    client_name: str,
+    amount: Decimal,
+    currency: Currency,
+    after: list[str],
+    warning: str | None,
+) -> str:
+    """TZ 13.4 step 2: the new balance and obligation, the warnings of 6.6 in bold."""
+    lines = [
+        "<b>Проверьте выдачу</b>" if paying else "<b>Проверьте получение</b>",
+        client_line(client_name),
+        f"{'Выдаём' if paying else 'Получаем'}: {format_money(amount, currency)}",
+        "",
+        "<b>После сохранения:</b>",
+        *after,
+    ]
+    if warning:
+        lines += ["", f"<b>{warning}</b>"]
+    return "\n".join(lines)
+
+
+# --- Som loans (TZ 13.5) -------------------------------------------------------------------------
+
+LOANS_TITLE = "<b>Долги в сомах</b>"
+BTN_LOAN_GIVE = "Выдал в долг"
+BTN_LOAN_REPAY_IN = "Мне вернули"
+BTN_LOAN_TAKE = "Взял в долг"
+BTN_LOAN_REPAY_OUT = "Я вернул"
+BTN_WHO_OWES = "Кто кому должен"
+LOAN_LABEL = {
+    OperationType.LOAN_GIVE: BTN_LOAN_GIVE,
+    OperationType.LOAN_REPAY_IN: BTN_LOAN_REPAY_IN,
+    OperationType.LOAN_TAKE: BTN_LOAN_TAKE,
+    OperationType.LOAN_REPAY_OUT: BTN_LOAN_REPAY_OUT,
+}
+ASK_LOAN_AMOUNT = "Сколько сомов?"
+ASK_RECORD_COMMENT = "Добавьте комментарий к записи или нажмите «Пропустить»:"
+OWED_TO_US = "Нам должны:"
+WE_OWE = "Мы должны:"
+NO_LOAN_DEBTS = "Долгов в сомах нет."
+
+
+def loans_screen() -> str:
+    return f"{LOANS_TITLE}\n\nВыберите действие:"
+
+
+def loan_title(op_type: OperationType, client_name: str | None = None) -> str:
+    """ "<b>Выдал в долг: Бекзат</b>"."""
+    if client_name is None:
+        return f"<b>{LOAN_LABEL[op_type]}</b>"
+    return f"<b>{LOAN_LABEL[op_type]}: {esc(client_name)}</b>"
+
+
+def loan_amount_line(amount: Decimal) -> str:
+    return f"Сумма: {format_money(amount, HOME_CURRENCY)}"
+
+
+def confirm_loan(
+    op_type: OperationType,
+    client_name: str,
+    amount: Decimal,
+    comment: str | None,
+    after: list[str],
+    warning: str | None,
+) -> str:
+    """TZ 13.5 step 5."""
+    lines = [
+        "<b>Проверьте запись</b>",
+        f"{LOAN_LABEL[op_type]}: {esc(client_name)}",
+        loan_amount_line(amount),
+    ]
+    if comment:
+        lines.append(f"Комментарий: {esc(comment)}")
+    lines += ["", "<b>После сохранения:</b>", *after]
+    if warning:
+        lines += ["", f"<b>{warning}</b>"]
+    return "\n".join(lines)
+
+
+def loan_debts_page(
+    items: list[tuple[str, Decimal]], owed_total: Decimal, owing_total: Decimal
+) -> str:
+    """«Кто кому должен» of som loans (TZ 13.5): both totals and one page of the two lists.
+
+    `items` are (name, obligation): above zero the client owes us.
+    """
+    title = f"{LOANS_TITLE} · {BTN_WHO_OWES.lower()}"
+    if not items:
+        return f"{title}\n{NO_LOAN_DEBTS}"
+    lines = [
+        title,
+        f"Итого нам должны: {format_money(owed_total, HOME_CURRENCY)}",
+        f"Итого мы должны: {format_money(owing_total, HOME_CURRENCY)}",
+    ]
+    section: bool | None = None
+    for name, amount in items:
+        owed = amount > 0
+        if owed != section:
+            lines += ["", f"<b>{OWED_TO_US if owed else WE_OWE}</b>"]
+            section = owed
+        lines.append(f"{esc(name)} — {format_amount(abs(amount))}")
+    return "\n".join(lines)
 
 
 # --- Choosing a client inside a scenario (TZ 13.3 step 6, 13.5) --------------------------------

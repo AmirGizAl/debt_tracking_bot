@@ -19,7 +19,6 @@ from aiogram.types import (
     InlineKeyboardMarkup,
     MaybeInaccessibleMessage,
     Message,
-    TelegramObject,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -150,6 +149,16 @@ async def finish(
     await reset_scenario(state, bot, chat_id)
 
 
+async def not_saved(
+    callback: CallbackQuery, state: FSMContext, bot: Bot, session: AsyncSession, user: User
+) -> None:
+    """«Не сохранять»: the confirmation turns into the main menu, nothing is written."""
+    await state.clear()
+    if callback.message is not None:
+        await edit_or_send(bot, callback.message, await menu_text(session), main_menu(user))
+    await answer(callback, texts.RECORD_NOT_SAVED)
+
+
 class OnScreen(Filter):
     """Passes callbacks only from the message that shows the current scenario step."""
 
@@ -173,16 +182,6 @@ def chat_id_of(event: Message | CallbackQuery) -> int:
     if isinstance(event, Message):
         return event.chat.id
     return event.message.chat.id if event.message is not None else event.from_user.id
-
-
-class FlowOf(Filter):
-    """Passes when the active record scenario is of one of the given types."""
-
-    def __init__(self, *op_types: str) -> None:
-        self.op_types = {str(op_type) for op_type in op_types}
-
-    async def __call__(self, event: TelegramObject, state: FSMContext) -> bool:
-        return (await state.get_data()).get("op_type") in self.op_types
 
 
 async def leave_any(event: Message | CallbackQuery, state: FSMContext, bot: Bot) -> None:

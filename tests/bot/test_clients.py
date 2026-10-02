@@ -5,8 +5,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.bot import texts
 from app.db.models import Client, User
+from app.domain.entries import OperationType
+from app.services import days
 from tests.bot.harness import UserClient
 from tests.factories import make_client, make_loan
+from tests.services.accounting import EUR, KGS, RUB, USD, loan, open_balance, settle, swap
 
 MENU = texts.main_menu(1)
 
@@ -46,12 +49,12 @@ async def test_add_client_and_open_card(owner_client: UserClient) -> None:
     assert result.text == "Клиент «Иван» добавлен."
     assert menu.text == MENU
     await owner_client.click(texts.BTN_OPEN_CLIENT)
-    assert owner_client.last.text == "Иван\nКомментарий: сосед, г. Бишкек"
-    assert owner_client.last.button_texts == [
-        texts.BTN_EDIT,
-        texts.BTN_DELETE,
-        texts.BTN_ALL_CLIENTS,
-        texts.BTN_HOME,
+    assert owner_client.last.text == "Иван\nКомментарий: сосед, г. Бишкек\n\nОбязательств нет"
+    assert owner_client.last.buttons == [
+        [texts.BTN_GIVE_OUT, texts.BTN_TAKE_IN],
+        [texts.BTN_HISTORY, texts.BTN_STATEMENT],
+        [texts.BTN_EDIT, texts.BTN_DELETE],
+        [texts.BTN_ALL_CLIENTS, texts.BTN_HOME],
     ]
 
 
@@ -115,8 +118,57 @@ async def test_client_with_records_has_no_delete_button(
 
     await owner_client.click("Иван")
 
-    assert owner_client.last.text == "Иван\nКомментарий: сосед, г. Бишкек"
+    assert owner_client.last.text == (
+        "Иван\nКомментарий: сосед, г. Бишкек\n\nДолг в сомах: должен нам 1 000"
+    )
     assert texts.BTN_DELETE not in owner_client.last.button_texts
+
+
+async def test_card_shows_obligations_of_both_books(
+    owner_client: UserClient, session: AsyncSession
+) -> None:
+    owner = await owner_user(session)
+    await days.ensure_open_day(session)
+    await open_balance(session, owner, "1000000", KGS)
+    azamat = await make_client(session, owner, "Азамат", comment="из Оша")
+    await swap(session, owner, "87000", KGS, "1000", USD, rate="87", paid_now=False, client=azamat)
+    await swap(
+        session, owner, "5000", RUB, "4950", KGS, rate="0.99", received_now=False, client=azamat
+    )
+    await loan(session, owner, OperationType.LOAN_GIVE, azamat, "50000")
+    # 100 EUR owed and then paid: a zero line is not shown.
+    await swap(
+        session, owner, "100", EUR, "9800", KGS, rate="98", received_now=False, client=azamat
+    )
+    await settle(session, owner, OperationType.EXCHANGE_RECEIPT, azamat, "100", EUR)
+    await open_clients(owner_client)
+
+    await owner_client.click("Азамат")
+
+    # TZ 13.6
+    assert owner_client.last.text == "\n".join(
+        [
+            "Азамат",
+            "Комментарий: из Оша",
+            "",
+            "По обменам:",
+            "USD: мы должны 1 000",
+            "RUB: должен нам 5 000",
+            "",
+            "Долг в сомах: должен нам 50 000",
+        ]
+    )
+
+
+async def test_history_and_statement_come_later(
+    owner_client: UserClient, session: AsyncSession
+) -> None:
+    await make_client(session, await owner_user(session), "Иван")
+    await open_clients(owner_client)
+    await owner_client.click("Иван")
+
+    for button in (texts.BTN_HISTORY, texts.BTN_STATEMENT):
+        assert await owner_client.click(button) == texts.SECTION_SOON
 
 
 async def test_rename_and_edit_comment(owner_client: UserClient, session: AsyncSession) -> None:

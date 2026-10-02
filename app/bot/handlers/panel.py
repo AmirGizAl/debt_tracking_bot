@@ -13,7 +13,9 @@ from app.bot import texts
 from app.bot.flows import exchange
 from app.bot.handlers.balances import show_balances
 from app.bot.handlers.clients import show_clients
+from app.bot.handlers.loans import show_loans
 from app.bot.handlers.settings import show_settings
+from app.bot.handlers.settlements import show_waiting
 from app.bot.keyboards.common import MENU_ROWS, OWNER_ROW
 from app.bot.ui import leave_any
 from app.db.models import User
@@ -34,6 +36,11 @@ async def section_button(
         return
     if message.text == texts.BTN_EXCHANGE:
         await exchange.begin(message, state, bot)
+    elif message.text in (texts.BTN_TO_PAY, texts.BTN_TO_RECEIVE):
+        paying = message.text == texts.BTN_TO_PAY
+        await show_waiting(message, state, bot, session, paying)
+    elif message.text == texts.BTN_LOANS:
+        await show_loans(message, state, bot)
     elif message.text == texts.BTN_BALANCES:
         await show_balances(message, state, bot, session, user)
     elif message.text == texts.BTN_CLIENTS:

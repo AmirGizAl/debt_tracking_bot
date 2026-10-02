@@ -11,12 +11,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.bot import texts
 from app.bot.callbacks import ExchangeAction, ExchangeCb, MenuAction, MenuCb
-from app.bot.flows import client_picker
+from app.bot.flows import client_picker, records
 from app.bot.flows import exchange as flow
 from app.bot.flows.exchange import Event, Form
-from app.bot.keyboards.common import main_menu
 from app.bot.states import ExchangeFlow
-from app.bot.ui import OnScreen, answer, chat_id_of, edit_or_send, finish, menu_text
+from app.bot.ui import OnScreen, answer, chat_id_of, finish, not_saved
 from app.db.models import Client, User
 from app.domain import errors
 from app.domain.currency import Currency
@@ -36,13 +35,7 @@ def _step(action: ExchangeAction):
 async def _form(
     event: Event, state: FSMContext, bot: Bot, session: AsyncSession, user: User
 ) -> Form | None:
-    """The scenario data, or None (and the menu) if it is gone, e.g. after a restart."""
-    form = await flow.load(state)
-    if form is None:
-        if isinstance(event, CallbackQuery):
-            await answer(event, texts.STALE_ACTION)
-        await finish(bot, state, chat_id_of(event), user, session, texts.STALE_ACTION)
-    return form
+    return await records.current_form(Form, event, state, bot, session, user)
 
 
 @router.callback_query(MenuCb.filter(F.action == MenuAction.EXCHANGE))
@@ -382,10 +375,7 @@ async def save(
 async def dont_save(
     callback: CallbackQuery, state: FSMContext, bot: Bot, session: AsyncSession, user: User
 ) -> None:
-    assert callback.message is not None
-    await state.clear()
-    await edit_or_send(bot, callback.message, await menu_text(session), main_menu(user))
-    await answer(callback, texts.RECORD_NOT_SAVED)
+    await not_saved(callback, state, bot, session, user)
 
 
 @router.callback_query(StateFilter(ExchangeFlow), _step(ExchangeAction.BACK), OnScreen())

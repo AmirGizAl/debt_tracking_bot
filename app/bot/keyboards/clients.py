@@ -2,6 +2,7 @@ from aiogram.types import InlineKeyboardMarkup
 
 from app.bot import texts
 from app.bot.callbacks import ClientsAction, ClientsCb
+from app.bot.keyboards import settlements
 from app.bot.keyboards.common import button, home_button, markup, pager
 from app.db.models import Client
 from app.services.pagination import Page
@@ -51,12 +52,17 @@ def open_client(client_id: int) -> InlineKeyboardMarkup:
 
 
 def client_card(client: Client, can_delete: bool) -> InlineKeyboardMarkup:
-    delete_row = (
-        [button(texts.BTN_DELETE, _cb(ClientsAction.DELETE, client.id))] if can_delete else []
-    )
+    """TZ 13.6: «Удалить» only for a client without records."""
+    edit_row = [button(texts.BTN_EDIT, _cb(ClientsAction.EDIT, client.id))]
+    if can_delete:
+        edit_row.append(button(texts.BTN_DELETE, _cb(ClientsAction.DELETE, client.id)))
     return markup(
-        [button(texts.BTN_EDIT, _cb(ClientsAction.EDIT, client.id))],
-        delete_row,
+        settlements.card_buttons(client.id),
+        [
+            button(texts.BTN_HISTORY, _cb(ClientsAction.HISTORY, client.id)),
+            button(texts.BTN_STATEMENT, _cb(ClientsAction.STATEMENT, client.id)),
+        ],
+        edit_row,
         [button(texts.BTN_ALL_CLIENTS, _cb(ClientsAction.LIST)), home_button()],
     )
 
