@@ -135,6 +135,16 @@ class ExchangeTerms:
         return self.received_now and self.paid_now
 
 
+def exchange_cash_changes(terms: ExchangeTerms) -> dict[Currency, Decimal]:
+    """How the balances move, known before the client is chosen (early check, TZ 13.3)."""
+    changes: dict[Currency, Decimal] = defaultdict(Decimal)
+    if terms.received_now:
+        changes[terms.give_currency] += terms.give_amount
+    if terms.paid_now:
+        changes[terms.get_currency] -= terms.get_amount
+    return dict(changes)
+
+
 def exchange_draft(
     terms: ExchangeTerms, client_id: int | None, comment: str | None = None
 ) -> Draft:

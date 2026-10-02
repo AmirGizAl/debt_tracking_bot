@@ -10,6 +10,8 @@ from aiogram.types import Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.bot import texts
+from app.bot.flows import exchange
+from app.bot.handlers.balances import show_balances
 from app.bot.handlers.clients import show_clients
 from app.bot.handlers.settings import show_settings
 from app.bot.keyboards.common import MENU_ROWS, OWNER_ROW
@@ -30,7 +32,11 @@ async def section_button(
         # A helper has no such buttons; typing the words opens nothing (TZ 5).
         await message.answer(texts.PERMISSION_DENIED)
         return
-    if message.text == texts.BTN_CLIENTS:
+    if message.text == texts.BTN_EXCHANGE:
+        await exchange.begin(message, state, bot)
+    elif message.text == texts.BTN_BALANCES:
+        await show_balances(message, state, bot, session, user)
+    elif message.text == texts.BTN_CLIENTS:
         await show_clients(message, state, bot, session)
     elif message.text == texts.BTN_SETTINGS:
         await show_settings(message, state, bot)

@@ -23,11 +23,9 @@ router = Router(name="menu")
 # Sections of version 2 that are not built yet; each stage of docs/V2_PLAN.md removes some.
 COMING_SOON = frozenset(
     {
-        MenuAction.EXCHANGE,
         MenuAction.TO_PAY,
         MenuAction.TO_RECEIVE,
         MenuAction.LOANS,
-        MenuAction.BALANCES,
         MenuAction.REPORTS,
         MenuAction.CLOSE_DAY,
     }

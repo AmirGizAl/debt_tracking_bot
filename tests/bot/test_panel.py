@@ -49,7 +49,12 @@ async def test_helper_panel_has_no_owner_buttons(
 
 @pytest.mark.parametrize(
     ("button", "first_line"),
-    [(texts.BTN_CLIENTS, "Клиенты"), (texts.BTN_SETTINGS, "Настройки")],
+    [
+        (texts.BTN_EXCHANGE, "Обмен"),
+        (texts.BTN_BALANCES, "Балансы · день №1"),
+        (texts.BTN_CLIENTS, "Клиенты"),
+        (texts.BTN_SETTINGS, "Настройки"),
+    ],
 )
 async def test_panel_button_opens_its_section(
     owner_client: UserClient, button: str, first_line: str
@@ -68,11 +73,9 @@ async def test_panel_button_opens_its_section(
 @pytest.mark.parametrize(
     "button",
     [
-        texts.BTN_EXCHANGE,
         texts.BTN_TO_PAY,
         texts.BTN_TO_RECEIVE,
         texts.BTN_LOANS,
-        texts.BTN_BALANCES,
         texts.BTN_REPORTS,
         texts.BTN_CLOSE_DAY,
     ],
