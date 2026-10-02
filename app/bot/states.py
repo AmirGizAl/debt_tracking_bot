@@ -11,3 +11,27 @@ class ClientsFlow(StatesGroup):
     add_comment = State()
     edit_name = State()
     edit_comment = State()
+
+
+class OpeningFlow(StatesGroup):
+    currency = State()
+    amount = State()
+    confirm = State()
+
+
+class ExchangeFlow(StatesGroup):
+    give_currency = State()
+    get_currency = State()
+    amount = State()  # the first amount: given, or got after "Ввести сумму, которую получает"
+    rate = State()  # different currencies
+    second_amount = State()  # one currency: the other amount is typed, not calculated
+    mode = State()
+    confirm = State()
+    edit_amount = State()
+    comment = State()
+
+
+class ClientPick(StatesGroup):
+    choose = State()  # recent clients, search prompt or results; typed text is a search
+    new_name = State()
+    new_comment = State()

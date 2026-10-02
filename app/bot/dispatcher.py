@@ -14,11 +14,15 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.bot import texts
 from app.bot.handlers import (
+    balances,
+    client_picker,
     clients,
     errors,
+    exchange,
     fallback,
     group,
     menu,
+    opening,
     panel,
     start,
 )
@@ -86,7 +90,11 @@ def create_dispatcher(
         # The section panel sends plain texts: they must win over steps that wait for text.
         panel.router,
         settings_handlers.router,
+        opening.router,
         clients.router,
+        client_picker.router,
+        exchange.router,
+        balances.router,
         fallback.router,
     )
     return dispatcher

@@ -62,11 +62,9 @@ async def test_menu_shows_the_open_day(
 @pytest.mark.parametrize(
     "action",
     [
-        MenuAction.EXCHANGE,
         MenuAction.TO_PAY,
         MenuAction.TO_RECEIVE,
         MenuAction.LOANS,
-        MenuAction.BALANCES,
         MenuAction.REPORTS,
         MenuAction.CLOSE_DAY,
     ],

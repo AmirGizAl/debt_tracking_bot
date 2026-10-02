@@ -11,7 +11,9 @@ from html import escape
 from app.db.models import Client, User, UserStatus
 from app.domain.currency import HOME_CURRENCY, Currency
 from app.domain.dates import format_date
-from app.domain.money import format_rate
+from app.domain.entries import Book
+from app.domain.errors import ConversionProblem, InsufficientBalance, NumberProblem
+from app.domain.money import format_amount, format_money, format_rate
 
 
 def esc(value: object) -> str:
@@ -253,6 +255,268 @@ def rate_question(base: Currency, quote: Currency) -> str:
 def rate_text(rate: Decimal, base: Currency, quote: Currency) -> str:
     """ "1 USD = 87,5 KGS"."""
     return f"1 {base} = {format_rate(rate)} {quote}"
+
+
+# --- Numbers (TZ 4.2, 4.3) -------------------------------------------------------------------
+
+AMOUNT_ERRORS = {
+    NumberProblem.FORMAT: (
+        "Не получилось прочитать сумму. Введите число, например 1000, 1 000 или 1 000,50:"
+    ),
+    NumberProblem.PRECISION: (
+        "После запятой можно указать не больше двух знаков, например 1 000,50. "
+        "Введите сумму ещё раз:"
+    ),
+    NumberProblem.NOT_POSITIVE: "Сумма должна быть больше нуля. Введите сумму ещё раз:",
+    NumberProblem.TOO_LARGE: (
+        "Сумма слишком большая: не больше 999 999 999 999,99. Введите сумму ещё раз:"
+    ),
+}
+RATE_ERRORS = {
+    NumberProblem.FORMAT: "Не получилось прочитать курс. Введите число, например 87,5:",
+    NumberProblem.PRECISION: (
+        "У курса можно указать не больше шести знаков после запятой. Введите курс ещё раз:"
+    ),
+    NumberProblem.NOT_POSITIVE: "Курс должен быть больше нуля. Введите курс ещё раз:",
+    NumberProblem.TOO_LARGE: "Курс слишком большой. Введите курс ещё раз:",
+}
+CONVERSION_ERRORS = {
+    ConversionProblem.ZERO: (
+        "По этому курсу вторая сумма получается равной нулю. Проверьте сумму или курс "
+        "и введите курс ещё раз:"
+    ),
+    ConversionProblem.TOO_LARGE: (
+        "По этому курсу вторая сумма получается слишком большой. Проверьте сумму или курс "
+        "и введите курс ещё раз:"
+    ),
+}
+
+# --- Balances and obligations (TZ 6, 13.1, 13.7) -----------------------------------------------
+
+CASH_NAME = "Наличка"
+BTN_DAY_RECORDS = "Записи дня"
+BTN_ADJUST = "Корректировка"
+RECORD_NOT_SAVED = "Запись не сохранена."
+
+
+def balance_name(currency: Currency) -> str:
+    """ "Баланс USD" / "Наличка" (TZ 3: the som cash)."""
+    return CASH_NAME if currency == HOME_CURRENCY else f"Баланс {currency}"
+
+
+def balance_after(currency: Currency, value: Decimal) -> str:
+    """ "Баланс RUB: 88 500" / "Наличка: 913 000 KGS"."""
+    if currency == HOME_CURRENCY:
+        return f"{CASH_NAME}: {format_money(value, currency)}"
+    return f"{balance_name(currency)}: {format_amount(value)}"
+
+
+def balances_screen(day_number: int, balances: dict[Currency, Decimal]) -> str:
+    lines = [f"<b>Балансы · день №{day_number}</b>"]
+    for currency, value in balances.items():
+        if currency == HOME_CURRENCY:
+            lines.append(f"{CASH_NAME}: {format_money(value, currency)}")
+        else:
+            lines.append(f"{currency}: {format_amount(value)}")
+    return "\n".join(lines)
+
+
+def obligation_line(name: str, book: Book, currency: Currency, amount: Decimal) -> str:
+    """Names are never declined (TZ 13.1): "Азамат: мы должны 1 000 USD"."""
+    suffix = " (долг в сомах)" if book == Book.LOAN else ""
+    if amount > 0:
+        return f"{esc(name)}: должен нам {format_money(amount, currency)}{suffix}"
+    if amount < 0:
+        return f"{esc(name)}: мы должны {format_money(-amount, currency)}{suffix}"
+    if book == Book.LOAN:
+        return f"{esc(name)}: долга в сомах нет"
+    return f"{esc(name)}: обязательств в {currency} нет"
+
+
+def insufficient_balance(error: InsufficientBalance) -> str:
+    """TZ 6.5: "Недостаточно денег. / Баланс USD: 10 000 / Нужно: 20 000"."""
+    return (
+        "Недостаточно денег.\n"
+        f"{balance_name(error.currency)}: {format_amount(error.available)}\n"
+        f"Нужно: {format_amount(error.required)}"
+    )
+
+
+def insufficient_balance_not_saved(error: InsufficientBalance) -> str:
+    return f"{insufficient_balance(error)}\n{RECORD_NOT_SAVED}"
+
+
+def record_saved(number: int) -> str:
+    return f"Запись №{number} сохранена."
+
+
+# --- Opening balances (TZ 9, 13.11) ------------------------------------------------------------
+
+BTN_OPENING = "Начальные балансы"
+BTN_ENTER = "Внести"
+BTN_SAVE = "Сохранить"
+BTN_DONT_SAVE = "Не сохранять"
+OPENING_TITLE = "<b>Начальные балансы</b>"
+OPENING_ENTER_HINT = "Внесите деньги, которые есть на начало работы, по каждой валюте."
+OPENING_FIX_HINT = (
+    "Пока не закрыт первый день, ошибку можно исправить: отменить запись и внести заново."
+)
+OPENING_FROZEN = "Первый день закрыт: начальные балансы больше не меняются."
+OPENING_ALL_ENTERED = "Начальные балансы внесены по всем валютам."
+ASK_OPENING_CURRENCY = "Какую валюту вносите?"
+
+
+def opening_screen(baseline: dict[Currency, Decimal], frozen: bool, all_entered: bool) -> str:
+    lines = [OPENING_TITLE]
+    for currency, value in baseline.items():
+        if currency == HOME_CURRENCY:
+            lines.append(f"{CASH_NAME}: {format_money(value, currency)}")
+        else:
+            lines.append(f"{currency}: {format_amount(value)}")
+    if frozen:
+        hint = OPENING_FROZEN
+    elif all_entered:
+        hint = f"{OPENING_ALL_ENTERED} {OPENING_FIX_HINT}"
+    else:
+        hint = f"{OPENING_ENTER_HINT} {OPENING_FIX_HINT}"
+    return "\n".join([*lines, "", hint])
+
+
+def ask_opening_amount(currency: Currency) -> str:
+    return f"<b>Начальный баланс {currency}</b>\nСколько {currency} на начало работы?"
+
+
+def confirm_opening(currency: Currency, amount: Decimal, balance: Decimal) -> str:
+    return "\n".join(
+        [
+            "<b>Проверьте начальный баланс</b>",
+            f"Валюта: {currency}",
+            f"Сумма: {format_money(amount, currency)}",
+            "",
+            "<b>После сохранения:</b>",
+            balance_after(currency, balance),
+        ]
+    )
+
+
+def opening_exists(currency: Currency) -> str:
+    return (
+        f"Начальный баланс {currency} уже внесён. Чтобы исправить его, отмените ту запись "
+        "и внесите заново."
+    )
+
+
+# --- Exchange (TZ 6.4, 13.3) -------------------------------------------------------------------
+
+EXCHANGE_TITLE = "<b>Обмен</b>"
+ASK_GIVE_CURRENCY = "Что клиент отдаёт?"
+ASK_GET_CURRENCY = "Что клиент получает?"
+BTN_ENTER_GET_AMOUNT = "Ввести сумму, которую получает"
+BTN_ENTER_GIVE_AMOUNT = "Ввести сумму, которую отдаёт"
+ASK_MODE = "Как проходит обмен?"
+BTN_MODE_NOW = "Сразу: получили и выдали"
+BTN_MODE_RECEIVED = "Получили, выдадим позже"
+BTN_MODE_PAID = "Выдали, получим позже"
+BTN_MODE_LATER = "Обе стороны позже"
+NOTHING_TO_EXCHANGE = (
+    "Одна валюта, одинаковые суммы и обе стороны сразу: записывать нечего. "
+    "Измените сумму или выберите другой вариант."
+)
+BTN_EDIT_AMOUNT = "Изменить сумму"
+BTN_COMMENT = "Комментарий"
+BTN_SET_CLIENT = "Указать клиента"
+ASK_EXCHANGE_COMMENT = "Напишите комментарий к обмену:"
+NO_CLIENT = "без имени"
+
+
+def ask_give_amount(currency: Currency) -> str:
+    return f"Сколько клиент отдаёт ({currency})?"
+
+
+def ask_get_amount(currency: Currency) -> str:
+    return f"Сколько клиент получает ({currency})?"
+
+
+def btn_last_rate(rate: Decimal) -> str:
+    return f"Последний курс: {format_rate(rate)}"
+
+
+def exchange_line(
+    give_currency: Currency | None,
+    give_amount: Decimal | None,
+    get_currency: Currency | None,
+    get_amount: Decimal | None,
+) -> str:
+    """ "88 500 RUB → 1 000 USD"; a part not known yet shows as a currency or "…"."""
+
+    def side(currency: Currency | None, amount: Decimal | None) -> str:
+        if currency is None:
+            return "…"
+        return format_money(amount, currency) if amount is not None else str(currency)
+
+    return f"{side(give_currency, give_amount)} → {side(get_currency, get_amount)}"
+
+
+def exchange_step(line: str, question: str, problem: str | None = None) -> str:
+    parts = [f"{EXCHANGE_TITLE}\n{line}"]
+    if problem:
+        parts.append(problem)
+    parts.append(f"<b>{question}</b>")
+    return "\n\n".join(parts)
+
+
+def give_status(received_now: bool) -> str:
+    return "получено" if received_now else "получим позже"
+
+
+def get_status(paid_now: bool) -> str:
+    return "выдано" if paid_now else "выдадим позже"
+
+
+def confirm_exchange(
+    *,
+    client_name: str | None,
+    give_currency: Currency,
+    give_amount: Decimal,
+    get_currency: Currency,
+    get_amount: Decimal,
+    received_now: bool,
+    paid_now: bool,
+    rate_line: str | None,
+    comment: str | None,
+    after: list[str],
+) -> str:
+    """TZ 13.3 step 7."""
+    lines = [
+        "<b>Проверьте обмен</b>",
+        f"Клиент: {esc(client_name) if client_name else NO_CLIENT}",
+        f"Клиент отдаёт: {format_money(give_amount, give_currency)} — {give_status(received_now)}",
+        f"Клиент получает: {format_money(get_amount, get_currency)} — {get_status(paid_now)}",
+    ]
+    if rate_line:
+        lines.append(f"Курс: {rate_line}")
+    if comment:
+        lines.append(f"Комментарий: {esc(comment)}")
+    lines += ["", "<b>После сохранения:</b>", *after]
+    return "\n".join(lines)
+
+
+def ask_edit_amount(currency: Currency, gets: bool) -> str:
+    who = "получает" if gets else "отдаёт"
+    return f"Сколько клиент {who} ({currency})? Введите новую сумму:"
+
+
+# --- Choosing a client inside a scenario (TZ 13.3 step 6, 13.5) --------------------------------
+
+CLIENT_QUESTION = "Клиент?"
+CHOOSE_CLIENT_HINT = "Выберите клиента из недавних или напишите часть имени для поиска."
+NO_CLIENTS_YET = "Клиентов пока нет. Нажмите «Новый клиент»."
+ASK_NEW_CLIENT_NAME = "Введите имя нового клиента:"
+
+
+def client_step(title: str, has_clients: bool) -> str:
+    hint = CHOOSE_CLIENT_HINT if has_clients else NO_CLIENTS_YET
+    return f"{title}\n\n<b>{CLIENT_QUESTION}</b>\n{hint}"
 
 
 # --- Group chat (GROUP_CHAT_ID; customer's request, kept for version 2) ------------------

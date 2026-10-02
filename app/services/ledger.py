@@ -66,6 +66,18 @@ async def balances(session: AsyncSession) -> dict[Currency, Decimal]:
     return {currency: totals.get(currency, ZERO) for currency in CURRENCIES}
 
 
+async def check_available(session: AsyncSession, changes: dict[Currency, Decimal]) -> None:
+    """Early, friendly check on the step where the amount is known (TZ 6.5).
+
+    The final check runs under the lock when the record is saved.
+    """
+    for currency in sorted(changes, key=CURRENCIES.index):
+        if changes[currency] < 0:
+            available = await balance(session, currency)
+            if available + changes[currency] < 0:
+                raise InsufficientBalance(currency, available, -changes[currency])
+
+
 async def obligation(
     session: AsyncSession, client_id: int, book: Book, currency: Currency
 ) -> Decimal:

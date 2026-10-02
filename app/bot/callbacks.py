@@ -65,3 +65,67 @@ class ClientsCb(CallbackData, prefix="c"):
     action: ClientsAction
     client_id: int = 0
     page: int = 0
+
+
+class BalancesAction(StrEnum):
+    SHOW = "show"
+    RECORDS = "rec"
+    ADJUST = "adj"
+
+
+class BalancesCb(CallbackData, prefix="b"):
+    action: BalancesAction
+    page: int = 0
+
+
+class OpeningAction(StrEnum):
+    SHOW = "show"
+    ENTER = "enter"
+    CURRENCY = "cur"
+    SAVE = "save"
+    DONT_SAVE = "no"
+    BACK = "back"
+
+
+class OpeningCb(CallbackData, prefix="ob"):
+    """Opening balances in the settings; steps work on the current screen only."""
+
+    action: OpeningAction
+    value: str = ""
+
+
+class ExchangeAction(StrEnum):
+    GIVE = "give"  # value: currency
+    GET = "get"  # value: currency
+    SWITCH_SIDE = "side"  # type the amount the client gets instead
+    LAST_RATE = "rate"
+    MODE = "mode"  # value: ExchangeMode
+    SAVE = "save"
+    DONT_SAVE = "no"
+    EDIT_AMOUNT = "amt"
+    COMMENT = "cmt"
+    SET_CLIENT = "cli"
+    BACK = "back"
+
+
+class ExchangeCb(CallbackData, prefix="x"):
+    """Steps of the exchange scenario; valid only on the current scenario screen."""
+
+    action: ExchangeAction
+    value: str = ""
+
+
+class PickAction(StrEnum):
+    CLIENT = "cl"  # value: client id
+    SEARCH = "sr"
+    RESULTS = "rs"  # value: page
+    NEW = "nc"
+    SKIP_COMMENT = "skc"
+    BACK = "back"
+
+
+class PickCb(CallbackData, prefix="cp"):
+    """Choosing a client inside a scenario (exchange, som loans, statements)."""
+
+    action: PickAction
+    value: str = ""
