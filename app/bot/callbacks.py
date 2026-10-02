@@ -1,4 +1,9 @@
-"""CallbackData factories. Prefixes are short: Telegram limits callback data to 64 bytes."""
+"""CallbackData factories. Prefixes are short: Telegram limits callback data to 64 bytes.
+
+Old messages keep their buttons. Prefixes of version 1 scenarios (o, r, k, aj, rv, h, rp) are
+retired and must not be reused: a v1 button "Открыть запись №3" must not open the unrelated
+record №3 of version 2 (record numbers start again from 1).
+"""
 
 from enum import StrEnum
 
@@ -7,13 +12,14 @@ from aiogram.filters.callback_data import CallbackData
 
 class MenuAction(StrEnum):
     HOME = "home"
-    LEND = "lend"
-    REPAY_IN = "rin"
-    BORROW = "brw"
-    REPAY_OUT = "rout"
+    EXCHANGE = "ex"
+    TO_PAY = "pay"  # «Ждут выдачи»
+    TO_RECEIVE = "recv"  # «Ждут оплаты»
+    LOANS = "loans"
     CLIENTS = "cl"
-    CASH = "cash"
+    BALANCES = "bal"
     REPORTS = "rep"
+    CLOSE_DAY = "close"
     SETTINGS = "set"
 
 
@@ -53,107 +59,9 @@ class ClientsAction(StrEnum):
     CLEAR_COMMENT = "cc"
     DELETE = "dl"
     CONFIRM_DELETE = "dk"
-    HISTORY = "hs"
-    STATEMENT = "st"
 
 
 class ClientsCb(CallbackData, prefix="c"):
     action: ClientsAction
     client_id: int = 0
     page: int = 0
-
-
-class OpAction(StrEnum):
-    CLIENT = "cl"
-    SEARCH = "sr"
-    RESULTS = "rs"
-    NEW_CLIENT = "nc"
-    SKIP_CLIENT_COMMENT = "skc"
-    CURRENCY = "cur"
-    SAME_CURRENCY = "same"
-    OTHER_CURRENCY = "oth"
-    PAY_CURRENCY = "pc"
-    SKIP_COMMENT = "sk"
-    SAVE = "save"
-    DONT_SAVE = "no"
-    BACK = "back"
-
-
-class OpCb(CallbackData, prefix="o"):
-    """Steps of the record scenarios; valid only on the current scenario screen."""
-
-    action: OpAction
-    value: str = ""
-
-
-class RecordAction(StrEnum):
-    OPEN = "op"
-    CLIENT = "cl"
-    REVERSE = "rv"
-
-
-class RecordCb(CallbackData, prefix="r"):
-    """Record card: works from any message (results, history, notifications)."""
-
-    action: RecordAction
-    operation_id: int
-
-
-class CashAction(StrEnum):
-    SHOW = "show"
-    MOVEMENTS = "mv"
-    ADJUSTMENT_INFO = "ai"
-    ADJUST = "adj"
-
-
-class CashCb(CallbackData, prefix="k"):
-    action: CashAction
-    page: int = 0
-    item_id: int = 0
-
-
-class AdjAction(StrEnum):
-    CURRENCY = "cur"
-    ADD = "add"
-    REMOVE = "rem"
-    SAVE = "save"
-    DONT_SAVE = "no"
-    BACK = "back"
-
-
-class AdjCb(CallbackData, prefix="aj"):
-    """Steps of the cash adjustment scenario (current screen only)."""
-
-    action: AdjAction
-    value: str = ""
-
-
-class RevAction(StrEnum):
-    CONFIRM = "ok"
-    BACK = "back"
-
-
-class RevCb(CallbackData, prefix="rv"):
-    """Steps of the reversal scenario (current screen only)."""
-
-    action: RevAction
-
-
-class HistoryCb(CallbackData, prefix="h"):
-    client_id: int
-    page: int = 0
-
-
-class RepAction(StrEnum):
-    KIND = "k"
-    CLIENT = "cl"
-    SEARCH = "sr"
-    RESULTS = "rs"
-    PERIOD = "p"
-    FORMAT = "f"
-    BACK = "b"
-
-
-class RepCb(CallbackData, prefix="rp"):
-    action: RepAction
-    value: str = ""

@@ -5,46 +5,91 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import User, UserRole, UserStatus
 from app.domain import errors
 from app.services import users
+from tests.conftest import create_user
 
 
-async def test_ensure_owner_creates_active_owner(session: AsyncSession) -> None:
-    owner = await users.ensure_owner(session, 1001)
-
-    assert owner.telegram_id == 1001
-    assert owner.role == UserRole.OWNER
-    assert owner.status == UserStatus.ACTIVE
-    assert owner.activated_at is not None
+async def owners(session: AsyncSession) -> list[tuple[int | None, UserStatus]]:
+    rows = await session.execute(
+        select(User.telegram_id, User.status).where(User.role == UserRole.OWNER).order_by(User.id)
+    )
+    return [(telegram_id, status) for telegram_id, status in rows]
 
 
-async def test_ensure_owner_is_idempotent(session: AsyncSession) -> None:
-    first = await users.ensure_owner(session, 1001)
-    second = await users.ensure_owner(session, 1001)
+async def test_sync_creates_every_listed_owner(session: AsyncSession) -> None:
+    created = await users.sync_owners(session, [1001, 1003])
 
-    assert first.id == second.id
+    assert [owner.telegram_id for owner in created] == [1001, 1003]
+    assert all(owner.activated_at is not None for owner in created)
+    assert await owners(session) == [(1001, UserStatus.ACTIVE), (1003, UserStatus.ACTIVE)]
+
+
+async def test_sync_is_idempotent(session: AsyncSession) -> None:
+    first = await users.sync_owners(session, [1001])
+    second = await users.sync_owners(session, [1001])
+
+    assert first[0].id == second[0].id
     assert await session.scalar(select(func.count()).select_from(User)) == 1
 
 
-async def test_new_owner_id_marks_previous_owner_deleted(session: AsyncSession) -> None:
-    old = await users.ensure_owner(session, 1001)
-    new = await users.ensure_owner(session, 1002)
-    await session.refresh(old)
+async def test_sync_turns_a_listed_helper_into_an_owner(session: AsyncSession) -> None:
+    await create_user(session, telegram_id=2002, username="aigul_k", full_name="Айгуль")
 
-    assert old.status == UserStatus.DELETED
-    assert old.deleted_at is not None
-    assert new.id != old.id
-    assert new.status == UserStatus.ACTIVE
+    [owner] = await users.sync_owners(session, [2002])
+
+    assert (owner.role, owner.status, owner.username) == (
+        UserRole.OWNER,
+        UserStatus.ACTIVE,
+        "aigul_k",
+    )
+    assert await session.scalar(select(func.count()).select_from(User)) == 1
+
+
+async def test_owner_left_out_of_the_list_loses_access(session: AsyncSession) -> None:
+    await users.sync_owners(session, [1001, 1003])
+
+    await users.sync_owners(session, [1003])
+
+    assert await owners(session) == [(1001, UserStatus.DELETED), (1003, UserStatus.ACTIVE)]
     assert await users.get_active_by_telegram_id(session, 1001) is None
-    assert await users.get_active_by_telegram_id(session, 1002) == new
 
 
-async def test_switching_owner_back_revives_the_same_row(session: AsyncSession) -> None:
-    first = await users.ensure_owner(session, 1001)
-    await users.ensure_owner(session, 1002)
-    revived = await users.ensure_owner(session, 1001)
+async def test_owner_listed_again_gets_the_same_row(session: AsyncSession) -> None:
+    [first] = await users.sync_owners(session, [1001])
+    await users.sync_owners(session, [1003])
+
+    [revived, _] = await users.sync_owners(session, [1001, 1003])
 
     assert revived.id == first.id
     assert revived.status == UserStatus.ACTIVE
     assert revived.deleted_at is None
+
+
+async def test_revived_owner_gives_up_a_nickname_taken_since(
+    session: AsyncSession, owner: User
+) -> None:
+    # Two removed helpers once had the nickname; inviting it again revives the later one.
+    older = await create_user(
+        session, telegram_id=2002, username="aigul_k", status=UserStatus.DELETED
+    )
+    await create_user(session, telegram_id=2004, username="aigul_k", status=UserStatus.DELETED)
+    await users.add_helper(session, owner, "aigul_k")
+
+    await users.sync_owners(session, [owner.telegram_id or 0, 2002])
+
+    await session.refresh(older)
+    assert (older.role, older.status, older.username) == (UserRole.OWNER, UserStatus.ACTIVE, None)
+
+
+async def test_empty_list_of_owners_is_refused(session: AsyncSession) -> None:
+    with pytest.raises(ValueError, match="empty"):
+        await users.sync_owners(session, [])
+
+
+async def test_active_owners_are_notified(session: AsyncSession) -> None:
+    await users.sync_owners(session, [1001, 1003])
+    await create_user(session, telegram_id=2002, username="aigul_k")
+
+    assert [owner.telegram_id for owner in await users.active_owners(session)] == [1001, 1003]
 
 
 # --- helpers (TZ 9.2-9.4) --------------------------------------------------------------------

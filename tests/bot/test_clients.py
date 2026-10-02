@@ -1,14 +1,14 @@
-"""Clients section through the bot UI (TZ 10, 12.6)."""
+"""Clients section through the bot UI (TZ 13.6)."""
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.bot import texts
 from app.db.models import Client, User
-from app.domain.currency import Currency
-from app.domain.operations import OperationType
 from tests.bot.harness import UserClient
-from tests.factories import make_client, make_operation
+from tests.factories import make_client, make_loan
+
+MENU = texts.main_menu(1)
 
 
 async def open_clients(client: UserClient) -> None:
@@ -44,12 +44,10 @@ async def test_add_client_and_open_card(owner_client: UserClient) -> None:
 
     result, menu = owner_client.bot_messages[-2:]
     assert result.text == "Клиент «Иван» добавлен."
-    assert menu.text == texts.MAIN_MENU
+    assert menu.text == MENU
     await owner_client.click(texts.BTN_OPEN_CLIENT)
-    assert owner_client.last.text == "Иван\nКомментарий: сосед, г. Бишкек\n\nДолгов нет"
+    assert owner_client.last.text == "Иван\nКомментарий: сосед, г. Бишкек"
     assert owner_client.last.button_texts == [
-        texts.BTN_HISTORY,
-        texts.BTN_STATEMENT,
         texts.BTN_EDIT,
         texts.BTN_DELETE,
         texts.BTN_ALL_CLIENTS,
@@ -107,23 +105,18 @@ async def test_search(owner_client: UserClient, session: AsyncSession) -> None:
     assert owner_client.last.text.startswith("По запросу «ноль» никого не нашлось.")
 
 
-async def test_card_shows_debts_and_hides_delete(
+async def test_client_with_records_has_no_delete_button(
     owner_client: UserClient, session: AsyncSession
 ) -> None:
     owner = await owner_user(session)
     ivan = await make_client(session, owner, "Иван", comment="сосед, г. Бишкек")
-    await make_operation(session, owner, ivan, OperationType.LEND, "1000")
-    await make_operation(session, owner, ivan, OperationType.BORROW, "300")
-    await make_operation(session, owner, ivan, OperationType.BORROW, "20000", Currency.RUB)
+    await make_loan(session, owner, ivan, "1000")
     await open_clients(owner_client)
 
     await owner_client.click("Иван")
 
-    assert owner_client.last.text == (
-        "Иван\nКомментарий: сосед, г. Бишкек\n\nДолги:\nUSD: должен вам 700\nRUB: вы должны 20 000"
-    )
+    assert owner_client.last.text == "Иван\nКомментарий: сосед, г. Бишкек"
     assert texts.BTN_DELETE not in owner_client.last.button_texts
-    assert "20\u00a0000" in owner_client.last.html  # thousands split by a no-break space
 
 
 async def test_rename_and_edit_comment(owner_client: UserClient, session: AsyncSession) -> None:

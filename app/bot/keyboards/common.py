@@ -27,40 +27,33 @@ def home_button() -> InlineKeyboardButton:
     return button(texts.BTN_HOME, MenuCb(action=MenuAction.HOME))
 
 
-def main_menu(user: User) -> InlineKeyboardMarkup:
-    def item(text: str, action: MenuAction) -> InlineKeyboardButton:
-        return button(text, MenuCb(action=action))
+# Rows of the main menu and of the panel (TZ 13.2); the last row is for owners only.
+MENU_ROWS: tuple[tuple[tuple[str, MenuAction], ...], ...] = (
+    ((texts.BTN_EXCHANGE, MenuAction.EXCHANGE),),
+    ((texts.BTN_TO_PAY, MenuAction.TO_PAY), (texts.BTN_TO_RECEIVE, MenuAction.TO_RECEIVE)),
+    ((texts.BTN_LOANS, MenuAction.LOANS), (texts.BTN_CLIENTS, MenuAction.CLIENTS)),
+    ((texts.BTN_BALANCES, MenuAction.BALANCES), (texts.BTN_REPORTS, MenuAction.REPORTS)),
+)
+OWNER_ROW: tuple[tuple[str, MenuAction], ...] = (
+    (texts.BTN_CLOSE_DAY, MenuAction.CLOSE_DAY),
+    (texts.BTN_SETTINGS, MenuAction.SETTINGS),
+)
 
-    last_row = [item(texts.BTN_REPORTS, MenuAction.REPORTS)]
-    if user.is_owner:
-        last_row.append(item(texts.BTN_SETTINGS, MenuAction.SETTINGS))
+
+def _menu_rows(user: User) -> list[tuple[tuple[str, MenuAction], ...]]:
+    return [*MENU_ROWS, OWNER_ROW] if user.is_owner else list(MENU_ROWS)
+
+
+def main_menu(user: User) -> InlineKeyboardMarkup:
     return markup(
-        [item(texts.BTN_LEND, MenuAction.LEND), item(texts.BTN_REPAY_IN, MenuAction.REPAY_IN)],
-        [
-            item(texts.BTN_BORROW, MenuAction.BORROW),
-            item(texts.BTN_REPAY_OUT, MenuAction.REPAY_OUT),
-        ],
-        [item(texts.BTN_CLIENTS, MenuAction.CLIENTS), item(texts.BTN_CASH, MenuAction.CASH)],
-        last_row,
+        *[[button(text, MenuCb(action=action)) for text, action in row] for row in _menu_rows(user)]
     )
 
 
 def panel(user: User) -> ReplyKeyboardMarkup:
     """Section panel under the input field, always shown; same layout as the main menu."""
-
-    def item(text: str) -> KeyboardButton:
-        return KeyboardButton(text=text)
-
-    last_row = [item(texts.BTN_REPORTS)]
-    if user.is_owner:
-        last_row.append(item(texts.BTN_SETTINGS))
     return ReplyKeyboardMarkup(
-        keyboard=[
-            [item(texts.BTN_LEND), item(texts.BTN_REPAY_IN)],
-            [item(texts.BTN_BORROW), item(texts.BTN_REPAY_OUT)],
-            [item(texts.BTN_CLIENTS), item(texts.BTN_CASH)],
-            last_row,
-        ],
+        keyboard=[[KeyboardButton(text=text) for text, _ in row] for row in _menu_rows(user)],
         resize_keyboard=True,
         is_persistent=True,
     )

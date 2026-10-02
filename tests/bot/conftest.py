@@ -10,9 +10,9 @@ from app.bot.dispatcher import create_dispatcher
 from app.config import Settings
 from app.db.models import User
 from app.db.session import create_sessionmaker
-from app.services import users
+from app.services import days, users
 from tests.bot.harness import BOT_TOKEN, FakeTelegram, Harness, JsonMemoryStorage, UserClient
-from tests.conftest import OWNER_TG_ID
+from tests.conftest import OWNER_TG_ID, SECOND_OWNER_TG_ID
 
 
 @pytest.fixture(scope="session")
@@ -20,7 +20,7 @@ def settings(database_url: str) -> Settings:
     return Settings(
         _env_file=None,
         bot_token=BOT_TOKEN,
-        owner_telegram_id=OWNER_TG_ID,
+        owner_telegram_ids=(OWNER_TG_ID, SECOND_OWNER_TG_ID),
         database_url=database_url,
         redis_url=None,
         tz="Europe/Moscow",
@@ -41,7 +41,9 @@ async def harness(
     settings: Settings,
 ) -> AsyncIterator[Harness]:
     async with sessionmaker() as session:
-        await users.ensure_owner(session, settings.owner_telegram_id)
+        # What the bot does on start (TZ 15.3): sync the owners, open day №1.
+        await users.sync_owners(session, settings.owner_telegram_ids)
+        await days.ensure_open_day(session)
     dispatcher.fsm.storage = JsonMemoryStorage()
     telegram = FakeTelegram()
     bot = Bot(
@@ -56,6 +58,11 @@ async def harness(
 @pytest.fixture
 def owner_client(harness: Harness) -> UserClient:
     return harness.user(OWNER_TG_ID, username="boss", first_name="Владелец")
+
+
+@pytest.fixture
+def second_owner_client(harness: Harness) -> UserClient:
+    return harness.user(SECOND_OWNER_TG_ID, first_name="Второй владелец")
 
 
 @pytest.fixture

@@ -11,8 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.bot import texts
 from app.bot.keyboards.common import main_menu, panel
-from app.bot.notify import notify_group, notify_owner
-from app.bot.ui import answer
+from app.bot.notify import notify_group, notify_owners
+from app.bot.ui import answer, menu_text
 from app.config import Settings
 from app.db.models import User
 from app.services import users
@@ -23,10 +23,10 @@ MEDIA_GROUP_TTL = 60.0
 
 
 class AccessMiddleware(BaseMiddleware):
-    """Outer middleware for Message and CallbackQuery (TZ 9.5).
+    """Outer middleware for Message and CallbackQuery (TZ 13.12).
 
     Passes the update on only for an active user and puts the db `User` into `data["user"]`.
-    A pending helper is activated by username on their first update (TZ 9.3).
+    A pending helper is activated by username on their first update.
     """
 
     def __init__(self, settings: Settings) -> None:
@@ -51,15 +51,17 @@ class AccessMiddleware(BaseMiddleware):
 
         session: AsyncSession = data["session"]
         user = await users.get_active_by_telegram_id(session, tg_user.id)
-        if user is None and tg_user.id == self.settings.owner_telegram_id:
+        if user is None and tg_user.id in self.settings.owner_telegram_ids:
+            # Owners are synced on start; this covers a database restored since then.
             user = await users.ensure_owner(session, tg_user.id)
+            await session.commit()
         if user is None:
             activated = await users.activate_by_username(
                 session, tg_user.id, tg_user.username, tg_user.full_name
             )
             if activated is not None:
                 logger.info("Helper @%s activated", activated.username)
-                await self._welcome(event, data["bot"], activated)
+                await self._welcome(event, data["bot"], session, activated)
                 return None
             logger.info("Access denied for telegram_id=%s (@%s)", tg_user.id, tg_user.username)
             await self._deny(event, has_username=bool(tg_user.username))
@@ -83,14 +85,18 @@ class AccessMiddleware(BaseMiddleware):
         self._seen_media_groups[group_id] = now
         return False
 
-    async def _welcome(self, event: TelegramObject, bot: Bot, helper: User) -> None:
+    async def _welcome(
+        self, event: TelegramObject, bot: Bot, session: AsyncSession, helper: User
+    ) -> None:
         if isinstance(event, CallbackQuery):
             await answer(event)
         assert helper.telegram_id is not None
         await bot.send_message(helper.telegram_id, texts.PANEL_GREETING, reply_markup=panel(helper))
-        await bot.send_message(helper.telegram_id, texts.MAIN_MENU, reply_markup=main_menu(helper))
+        await bot.send_message(
+            helper.telegram_id, await menu_text(session), reply_markup=main_menu(helper)
+        )
         notice = texts.helper_activated_notice(helper)
-        await notify_owner(bot, self.settings, notice)
+        await notify_owners(bot, session, notice)
         await notify_group(bot, self.settings, notice)
 
     @staticmethod

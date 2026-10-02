@@ -1,7 +1,8 @@
 import re
+from collections.abc import Sequence
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -46,46 +47,81 @@ async def get_active_by_telegram_id(session: AsyncSession, telegram_id: int) -> 
 
 
 async def ensure_owner(session: AsyncSession, telegram_id: int) -> User:
-    """Create or update the owner from OWNER_TELEGRAM_ID (TZ 9.1).
+    """Make the account an active owner; does not commit.
 
-    If the configured id changed, the previous owner is marked deleted: the old account loses
-    access at once and its records stay in history as "(удалён)".
+    A helper with this account becomes an owner (TZ 13.12). A removed owner or helper coming
+    back gets their old row again, so their records stay theirs.
     """
     now = _now()
-    previous_owners = await session.scalars(
-        select(User).where(
-            User.role == UserRole.OWNER,
-            User.status != UserStatus.DELETED,
-            User.telegram_id.is_distinct_from(telegram_id),
-        )
-    )
-    for previous in previous_owners:
-        previous.status = UserStatus.DELETED
-        previous.deleted_at = now
-    await session.flush()
-
-    owner = await session.scalar(
+    user = await session.scalar(
         select(User).where(User.telegram_id == telegram_id, User.status != UserStatus.DELETED)
     )
-    if owner is None:
-        # Same person coming back (e.g. the id was switched back): revive their row.
-        owner = await session.scalar(
+    if user is None:
+        user = await session.scalar(
             select(User)
             .where(User.telegram_id == telegram_id, User.status == UserStatus.DELETED)
             .order_by(User.id.desc())
             .limit(1)
         )
-    if owner is None:
-        owner = User(telegram_id=telegram_id, role=UserRole.OWNER, status=UserStatus.ACTIVE)
-        session.add(owner)
-    owner.role = UserRole.OWNER
-    if owner.status != UserStatus.ACTIVE:
-        owner.status = UserStatus.ACTIVE
-        owner.activated_at = now
-        owner.deleted_at = None
-    owner.activated_at = owner.activated_at or now
+        if user is not None and user.username is not None:
+            taken = await session.scalar(
+                select(User.id).where(
+                    User.username == user.username, User.status != UserStatus.DELETED
+                )
+            )
+            if taken is not None:
+                # The nickname now belongs to someone invited later; owners do without it.
+                user.username = None
+    if user is None:
+        user = User(telegram_id=telegram_id, role=UserRole.OWNER, status=UserStatus.ACTIVE)
+        session.add(user)
+    user.role = UserRole.OWNER
+    if user.status != UserStatus.ACTIVE:
+        user.status = UserStatus.ACTIVE
+        user.activated_at = now
+        user.deleted_at = None
+    user.activated_at = user.activated_at or now
+    await session.flush()
+    return user
+
+
+async def sync_owners(session: AsyncSession, telegram_ids: Sequence[int]) -> list[User]:
+    """Owners are exactly the accounts of OWNER_TELEGRAM_IDS (TZ 13.12), run on every start.
+
+    An owner who is no longer listed is marked deleted: access is gone at once, their records
+    stay in history as "(удалён)".
+    """
+    if not telegram_ids:
+        raise ValueError("the list of owners is empty")
+    now = _now()
+    removed = await session.scalars(
+        select(User).where(
+            User.role == UserRole.OWNER,
+            User.status != UserStatus.DELETED,
+            or_(User.telegram_id.is_(None), User.telegram_id.not_in(telegram_ids)),
+        )
+    )
+    for user in removed:
+        user.status = UserStatus.DELETED
+        user.deleted_at = now
+    await session.flush()
+    owners = [await ensure_owner(session, telegram_id) for telegram_id in telegram_ids]
     await session.commit()
-    return owner
+    return owners
+
+
+async def active_owners(session: AsyncSession) -> list[User]:
+    """Everybody who gets the owners' notifications (TZ 13.11)."""
+    result = await session.scalars(
+        select(User)
+        .where(
+            User.role == UserRole.OWNER,
+            User.status == UserStatus.ACTIVE,
+            User.telegram_id.is_not(None),
+        )
+        .order_by(User.id)
+    )
+    return list(result)
 
 
 async def update_full_name(session: AsyncSession, user: User, full_name: str | None) -> None:
