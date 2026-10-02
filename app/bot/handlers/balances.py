@@ -35,11 +35,3 @@ async def open_balances(
 ) -> None:
     await show_balances(callback, state, bot, session, user)
     await answer(callback)
-
-
-@router.callback_query(
-    BalancesCb.filter(F.action.in_({BalancesAction.RECORDS, BalancesAction.ADJUST}))
-)
-async def coming_soon(callback: CallbackQuery) -> None:
-    # «Записи дня» and «Корректировка» come with the record card (docs/V2_PLAN.md, stage 6).
-    await answer(callback, texts.SECTION_SOON)

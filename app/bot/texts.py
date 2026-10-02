@@ -7,13 +7,14 @@ Anything that comes from users (names, comments, reasons) must go through `esc()
 from datetime import date, datetime
 from decimal import Decimal
 from html import escape
+from zoneinfo import ZoneInfo
 
-from app.db.models import Client, User, UserStatus
+from app.db.models import Client, Operation, User, UserStatus
 from app.domain.currency import HOME_CURRENCY, Currency
-from app.domain.dates import format_date
+from app.domain.dates import format_date, format_datetime, format_short_date
 from app.domain.entries import Book, OperationType
 from app.domain.errors import ConversionProblem, InsufficientBalance, NumberProblem
-from app.domain.money import format_amount, format_money, format_rate
+from app.domain.money import format_amount, format_money, format_rate, format_signed
 from app.domain.warnings import RecordWarning, WarningKind
 
 
@@ -721,6 +722,216 @@ def loan_debts_page(
     return "\n".join(lines)
 
 
+# --- Records: card, lists, cancellation (TZ 11, 13.7, 13.8) ---------------------------------------
+
+TYPE_LABEL = {
+    OperationType.EXCHANGE: "Обмен",
+    OperationType.EXCHANGE_PAYOUT: "Выдача по обмену",
+    OperationType.EXCHANGE_RECEIPT: "Получение по обмену",
+    **LOAN_LABEL,
+    OperationType.ADJUSTMENT: "Корректировка",
+    OperationType.OPENING: "Начальный баланс",
+}
+BTN_OPEN_RECORD = "Открыть запись"
+BTN_CANCEL_RECORD = "Отменить запись"
+BTN_CLIENT = "Клиент"
+BTN_CONFIRM_CANCEL = "Да, отменить"
+RECORD_NOT_FOUND = "Запись не найдена."
+RECORD_NOT_CANCELLED = "Запись не отменена."
+ASK_CANCEL_REASON = "Напишите причину отмены:"
+REASON_EMPTY = "Причина не может быть пустой. Напишите причину:"
+ALREADY_REVERSED = "Эта запись уже отменена."
+CANNOT_REVERSE_REVERSAL = "Отмену отменить нельзя. Если запись отменили зря, внесите её заново."
+CANNOT_REVERSE_ADJUSTMENT = "Корректировку отменить нельзя: внесите встречную корректировку."
+ONLY_AUTHOR_CAN_CANCEL = "Отменить запись может только тот, кто её внёс."
+DAY_RECORDS_EMPTY = "Записей за день пока нет."
+HISTORY_EMPTY = "Записей пока нет."
+CANCELLED_MARK = "отменена"
+
+
+def reversal_mark(original_id: int) -> str:
+    """The status of a cancelling record (TZ 11): "отмена записи №16"."""
+    return f"отмена записи №{original_id}"
+
+
+def _money_of(operation: Operation) -> str:
+    """ "88 500 RUB → 1 000 USD" / "5 000 KGS" / "−500 USD" (an adjustment has a sign)."""
+    if operation.type == OperationType.EXCHANGE:
+        assert operation.give_amount is not None and operation.give_currency is not None
+        assert operation.get_amount is not None and operation.get_currency is not None
+        give = format_money(operation.give_amount, operation.give_currency)
+        return f"{give} → {format_money(operation.get_amount, operation.get_currency)}"
+    assert operation.amount is not None and operation.currency is not None
+    if operation.type == OperationType.ADJUSTMENT:
+        return f"{format_signed(operation.amount)} {operation.currency}"
+    return format_money(operation.amount, operation.currency)
+
+
+def record_summary(operation: Operation, client_name: str | None, with_client: bool = True) -> str:
+    """ "Обмен · Азамат · 88 500 RUB → 1 000 USD" (button texts are not HTML: no escaping)."""
+    parts = [TYPE_LABEL[operation.type]]
+    if with_client and (client_name is not None or operation.type == OperationType.EXCHANGE):
+        parts.append(client_name or NO_CLIENT)
+    parts.append(_money_of(operation))
+    return " · ".join(parts)
+
+
+def _status_suffix(operation: Operation, reversed_by: int | None) -> str:
+    if operation.reversal_of_id is not None:
+        return f" · {reversal_mark(operation.reversal_of_id)}"
+    return f" · {CANCELLED_MARK}" if reversed_by is not None else ""
+
+
+def record_button(operation: Operation, client_name: str | None, reversed_by: int | None) -> str:
+    """A row of «Записи дня»: "№15 · Обмен · Азамат · 88 500 RUB → 1 000 USD · отменена"."""
+    summary = record_summary(operation, client_name)
+    return f"№{operation.id} · {summary}{_status_suffix(operation, reversed_by)}"
+
+
+def history_button(operation: Operation, reversed_by: int | None, zone: ZoneInfo) -> str:
+    """A row of the history of a client: "№15 · 02.10 · Обмен · 88 500 RUB → 1 000 USD"."""
+    day = format_short_date(operation.created_at.astimezone(zone).date())
+    summary = record_summary(operation, None, with_client=False)
+    return f"№{operation.id} · {day} · {summary}{_status_suffix(operation, reversed_by)}"
+
+
+def day_records_title(day_number: int, total: int) -> str:
+    title = f"<b>Записи дня №{day_number}</b>"
+    return f"{title}\n{DAY_RECORDS_EMPTY}" if total == 0 else f"{title}\nВсего: {total}"
+
+
+def history_title(client_name: str, total: int) -> str:
+    title = f"<b>История записей: {esc(client_name)}</b>"
+    return f"{title}\n{HISTORY_EMPTY}" if total == 0 else f"{title}\nВсего: {total}"
+
+
+def record_body(operation: Operation) -> list[str]:
+    """The client and the money of a record; `operation.client` must be loaded."""
+    client = operation.client.name if operation.client is not None else None
+    if operation.type == OperationType.EXCHANGE:
+        assert operation.give_amount is not None and operation.give_currency is not None
+        assert operation.get_amount is not None and operation.get_currency is not None
+        assert operation.received_now is not None and operation.paid_now is not None
+        give = format_money(operation.give_amount, operation.give_currency)
+        get = format_money(operation.get_amount, operation.get_currency)
+        lines = [
+            f"Клиент: {esc(client) if client else NO_CLIENT}",
+            f"Клиент отдаёт: {give} — {give_status(operation.received_now)}",
+            f"Клиент получает: {get} — {get_status(operation.paid_now)}",
+        ]
+        if operation.rate is not None:
+            assert operation.rate_base is not None and operation.rate_quote is not None
+            lines.append(
+                f"Курс: {rate_text(operation.rate, operation.rate_base, operation.rate_quote)}"
+            )
+    else:
+        lines = [client_line(client)] if client is not None else []
+        lines.append(f"Сумма: {_money_of(operation)}")
+    if operation.comment:
+        lines.append(f"Комментарий: {esc(operation.comment)}")
+    if operation.reason:
+        lines.append(f"Причина: {esc(operation.reason)}")
+    return lines
+
+
+def record_card(operation: Operation, reversal: Operation | None, zone: ZoneInfo) -> str:
+    """TZ 13.8. `operation.client` and `operation.author` must be loaded."""
+    lines = [
+        f"<b>Запись №{operation.id} · {TYPE_LABEL[operation.type]} · день №{operation.day_id}</b>",
+        *record_body(operation),
+        f"Автор: {esc(user_name(operation.author))} · "
+        f"{format_datetime(operation.created_at, zone)}",
+    ]
+    if operation.reversal_of_id is not None:
+        lines.append(
+            f"Статус: {reversal_mark(operation.reversal_of_id)} "
+            f"(причина: {esc(operation.reversal_reason)})"
+        )
+    if reversal is not None:
+        lines.append(
+            f"Статус: отменена записью №{reversal.id} (причина: {esc(reversal.reversal_reason)})"
+        )
+    return "\n".join(lines)
+
+
+def cancel_title(operation: Operation) -> str:
+    """ "<b>Отмена записи №16</b>" and what the record is."""
+    client = operation.client.name if operation.client is not None else None
+    return f"<b>Отмена записи №{operation.id}</b>\n{esc(record_summary(operation, client))}"
+
+
+def confirm_cancel(operation: Operation, reason: str, after: list[str]) -> str:
+    """TZ 11.3: balances and obligations as they will be after the cancellation."""
+    client = operation.client.name if operation.client is not None else None
+    return "\n".join(
+        [
+            f"<b>Отменить запись №{operation.id}?</b>",
+            esc(record_summary(operation, client)),
+            f"Причина: {esc(reason)}",
+            "",
+            "<b>После отмены:</b>",
+            *after,
+        ]
+    )
+
+
+def record_cancelled(original_id: int, reversal_id: int) -> str:
+    return f"Запись №{original_id} отменена записью №{reversal_id}."
+
+
+def insufficient_balance_not_cancelled(error: InsufficientBalance) -> str:
+    return f"{insufficient_balance(error)}\n{RECORD_NOT_CANCELLED}"
+
+
+def helper_cancelled_notice(helper: User, operation: Operation, reason: str) -> str:
+    """To every owner (TZ 11.7, 13.11). `operation.client` must be loaded."""
+    client = operation.client.name if operation.client is not None else None
+    return "\n".join(
+        [
+            "<b>Помощник отменил запись</b>",
+            f"Кто: {esc(user_name_with_username(helper))}",
+            f"Запись №{operation.id}: {esc(record_summary(operation, client))}",
+            f"Причина: {esc(reason)}",
+        ]
+    )
+
+
+# --- Adjustment of a balance (TZ 10, 13.7) --------------------------------------------------------
+
+ADJUST_TITLE = "<b>Корректировка</b>"
+ASK_ADJUST_CURRENCY = "Какой баланс исправить?"
+ASK_ADJUST_DIRECTION = "Добавить или убрать?"
+BTN_ADJUST_ADD = "Добавить"
+BTN_ADJUST_REMOVE = "Убрать"
+ASK_ADJUST_REASON = "Напишите причину корректировки:"
+
+
+def adjust_title(currency: Currency) -> str:
+    return f"<b>Корректировка · {currency}</b>"
+
+
+def ask_adjust_amount(currency: Currency, adding: bool) -> str:
+    return f"Сколько {'добавить' if adding else 'убрать'} ({currency})?"
+
+
+def adjust_change(amount: Decimal, currency: Currency) -> str:
+    """ "Изменение: −500 USD"."""
+    return f"Изменение: {format_signed(amount)} {currency}"
+
+
+def confirm_adjustment(amount: Decimal, currency: Currency, reason: str, after: list[str]) -> str:
+    return "\n".join(
+        [
+            "<b>Проверьте корректировку</b>",
+            adjust_change(amount, currency),
+            f"Причина: {esc(reason)}",
+            "",
+            "<b>После сохранения:</b>",
+            *after,
+        ]
+    )
+
+
 # --- Choosing a client inside a scenario (TZ 13.3 step 6, 13.5) --------------------------------
 
 CLIENT_QUESTION = "Клиент?"
@@ -747,6 +958,32 @@ def bot_added_to_group(title: str | None, chat_id: int, connected: bool) -> str:
         f"укажите в файле .env строку\n<code>GROUP_CHAT_ID={chat_id}</code>\n"
         "и перезапустите бота."
     )
+
+
+def group_record_notice(operation: Operation, after: list[str], zone: ZoneInfo) -> str:
+    """A new record or a cancellation with the balances and obligations it changed.
+
+    `operation.client` and `operation.author` must be loaded.
+    """
+    if operation.reversal_of_id is not None:
+        client = operation.client.name if operation.client is not None else None
+        lines = [
+            f"<b>Новая запись №{operation.id} · {reversal_mark(operation.reversal_of_id)}</b>",
+            esc(record_summary(operation, client)),
+            f"Причина: {esc(operation.reversal_reason)}",
+        ]
+        heading = "<b>После отмены:</b>"
+    else:
+        lines = [
+            f"<b>Новая запись №{operation.id} · {TYPE_LABEL[operation.type]}</b>",
+            *record_body(operation),
+        ]
+        heading = "<b>После записи:</b>"
+    lines.append(
+        f"Автор: {esc(user_name_with_username(operation.author))} · "
+        f"{format_datetime(operation.created_at, zone)}"
+    )
+    return "\n".join([*lines, "", heading, *after])
 
 
 # --- Report files (TZ 14) -------------------------------------------------------------------

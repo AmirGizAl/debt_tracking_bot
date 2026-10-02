@@ -14,8 +14,11 @@ from app.bot.callbacks import ExchangeAction, ExchangeCb, MenuAction, MenuCb
 from app.bot.flows import client_picker, records
 from app.bot.flows import exchange as flow
 from app.bot.flows.exchange import Event, Form
+from app.bot.keyboards.records import open_record
+from app.bot.notify import post_record
 from app.bot.states import ExchangeFlow
 from app.bot.ui import OnScreen, answer, chat_id_of, finish, not_saved
+from app.config import Settings
 from app.db.models import Client, User
 from app.domain import errors
 from app.domain.currency import Currency
@@ -348,7 +351,12 @@ async def receive_comment(
 
 @router.callback_query(ExchangeFlow.confirm, _step(ExchangeAction.SAVE), OnScreen())
 async def save(
-    callback: CallbackQuery, state: FSMContext, bot: Bot, session: AsyncSession, user: User
+    callback: CallbackQuery,
+    state: FSMContext,
+    bot: Bot,
+    session: AsyncSession,
+    user: User,
+    settings: Settings,
 ) -> None:
     form = await _form(callback, state, bot, session, user)
     if form is None:
@@ -356,7 +364,7 @@ async def save(
     await answer(callback)
     chat_id = chat_id_of(callback)
     try:
-        record, _created = await exchange.create_exchange(
+        record, created = await exchange.create_exchange(
             session, user, uuid.UUID(form.request_id), form.terms(), form.client_id, form.comment
         )
     except errors.InsufficientBalance as error:
@@ -368,7 +376,11 @@ async def save(
         text = f"{texts.CLIENT_NOT_FOUND}\n{texts.RECORD_NOT_SAVED}"
         await finish(bot, state, chat_id, user, session, text)
         return
-    await finish(bot, state, chat_id, user, session, texts.record_saved(record.id))
+    await finish(
+        bot, state, chat_id, user, session, texts.record_saved(record.id), open_record(record.id)
+    )
+    if created:
+        await post_record(bot, settings, session, record.id)
 
 
 @router.callback_query(ExchangeFlow.confirm, _step(ExchangeAction.DONT_SAVE), OnScreen())

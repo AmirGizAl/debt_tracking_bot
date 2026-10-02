@@ -32,7 +32,7 @@ def can_reverse(
     )
 
 
-def _mirror(original: Operation) -> Draft:
+def mirror(original: Operation) -> Draft:
     """The same type and fields; every entry with the opposite sign."""
     return Draft(
         type=original.type,
@@ -89,7 +89,7 @@ async def reverse(
             session,
             actor,
             request_id,
-            _mirror(original),
+            mirror(original),
             reversal_of_id=original.id,
             reversal_reason=reason,
             check=check,

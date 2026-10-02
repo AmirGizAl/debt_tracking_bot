@@ -14,9 +14,9 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.bot import texts
+from app.bot import changes, texts
 from app.bot.callbacks import ExchangeAction
-from app.bot.flows import client_picker, records
+from app.bot.flows import client_picker
 from app.bot.flows.records import StoredForm
 from app.bot.keyboards import exchange as kb
 from app.bot.states import ExchangeFlow
@@ -221,7 +221,7 @@ async def show_client_step(
 async def after_lines(session: AsyncSession, form: Form) -> list[str]:
     """«После сохранения»: the balances and the client's obligations this exchange changes."""
     draft = exchange_draft(form.terms(), form.client_id)
-    return await records.after_lines(session, draft, form.client_name)
+    return await changes.after_lines(session, draft, form.client_name)
 
 
 async def show_confirm(
