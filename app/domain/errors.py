@@ -155,5 +155,17 @@ class CannotReverse(DomainError):
         self.reason = reason
 
 
+class DayNotFound(NotFound):
+    pass
+
+
 class DayAlreadyClosed(DomainError):
     """Somebody closed this day first (TZ 7.2)."""
+
+
+class MissingRate(DomainError):
+    """A currency of the day report has no rate (TZ 8.2)."""
+
+    def __init__(self, currency: Currency) -> None:
+        super().__init__(str(currency))
+        self.currency = currency
