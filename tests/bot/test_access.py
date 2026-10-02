@@ -59,16 +59,7 @@ async def test_menu_shows_the_open_day(
     assert owner_client.last.text == "День №2. Выберите действие:"
 
 
-@pytest.mark.parametrize(
-    "action",
-    [
-        MenuAction.TO_PAY,
-        MenuAction.TO_RECEIVE,
-        MenuAction.LOANS,
-        MenuAction.REPORTS,
-        MenuAction.CLOSE_DAY,
-    ],
-)
+@pytest.mark.parametrize("action", [MenuAction.REPORTS, MenuAction.CLOSE_DAY])
 async def test_sections_of_later_stages_say_so(
     owner_client: UserClient, action: MenuAction
 ) -> None:

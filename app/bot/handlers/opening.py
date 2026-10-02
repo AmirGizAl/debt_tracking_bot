@@ -16,7 +16,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.bot import texts
 from app.bot.callbacks import OpeningAction, OpeningCb
 from app.bot.keyboards import opening as kb
-from app.bot.keyboards.common import main_menu
 from app.bot.states import OpeningFlow
 from app.bot.ui import (
     OnScreen,
@@ -25,7 +24,7 @@ from app.bot.ui import (
     edit_or_send,
     finish,
     leave_scenario,
-    menu_text,
+    not_saved,
     show_step,
 )
 from app.db.models import User
@@ -173,10 +172,7 @@ async def save(
 async def dont_save(
     callback: CallbackQuery, state: FSMContext, bot: Bot, session: AsyncSession, user: User
 ) -> None:
-    assert callback.message is not None
-    await state.clear()
-    await edit_or_send(bot, callback.message, await menu_text(session), main_menu(user))
-    await answer(callback, texts.RECORD_NOT_SAVED)
+    await not_saved(callback, state, bot, session, user)
 
 
 @router.callback_query(StateFilter(OpeningFlow), _step(OpeningAction.BACK), OnScreen())

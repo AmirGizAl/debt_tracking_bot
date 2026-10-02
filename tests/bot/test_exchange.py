@@ -1,7 +1,6 @@
 """«Обмен» through the bot UI (TZ 13.3; scenarios 2-4, 6, 10, 12, 13 of 17.1)."""
 
-import pytest
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.bot import texts
@@ -9,22 +8,11 @@ from app.db.models import Client, Operation, User
 from app.domain.entries import Book, OperationType
 from app.services import ledger
 from tests.bot.harness import UserClient
+from tests.bot.steps import records, save
 from tests.factories import make_client
-from tests.services.accounting import KGS, RUB, USD, D, loan, open_balance, settle, swap
+from tests.services.accounting import KGS, RUB, USD, D, loan, settle, swap
 
 MENU = texts.main_menu(1)
-
-
-@pytest.fixture
-async def funded(session: AsyncSession, owner_user: User) -> User:
-    """TZ 17.1, scenario 1: 10 000 USD and 1 000 000 KGS."""
-    await open_balance(session, owner_user, "10000", USD)
-    await open_balance(session, owner_user, "1000000", KGS)
-    return owner_user
-
-
-async def records(session: AsyncSession) -> int:
-    return await session.scalar(select(func.count()).select_from(Operation)) or 0
 
 
 async def deal(
@@ -49,13 +37,6 @@ async def deal(
         await client.send(rate)
     if second is not None:
         await client.send(second)
-
-
-async def save(client: UserClient) -> str:
-    await client.click(texts.BTN_SAVE)
-    result, menu = client.bot_messages[-2:]
-    assert menu.text == MENU
-    return result.text
 
 
 async def test_scenario_2_instant_sale_of_dollars(
@@ -214,6 +195,12 @@ async def test_transfer_and_netting_scenarios_12_13(
     await owner_client.click("Тимур")
     assert owner_client.last.text.endswith("Баланс RUB: 100 000\nТимур: мы должны 99 000 RUB")
     await save(owner_client)
+    await owner_client.click(texts.BTN_TO_PAY)
+    assert owner_client.last.button_texts[0] == "Тимур · 99 000 RUB"
+    await owner_client.click(texts.BTN_HOME)
+    await owner_client.click(texts.BTN_CLIENTS)
+    await owner_client.click("Тимур")
+    assert owner_client.last.text == "Тимур\n\nПо обменам:\nRUB: мы должны 99 000"
 
     # 13. Тимур takes som instead: his rubles "come later" and settle our debt.
     await deal(owner_client, "RUB", "99 000", "KGS", rate="0,99")
@@ -224,6 +211,12 @@ async def test_transfer_and_netting_scenarios_12_13(
 
     assert await ledger.client_obligations(session, timur.id) == {}
     assert await ledger.balance(session, KGS) == D("901990")
+    await owner_client.click(texts.BTN_CLIENTS)
+    await owner_client.click("Тимур")
+    assert owner_client.last.text == "Тимур\n\nОбязательств нет"
+    await owner_client.click(texts.BTN_HOME)
+    await owner_client.click(texts.BTN_TO_PAY)
+    assert owner_client.last.text == "Ждут выдачи\nСейчас никто не ждёт выдачи."
 
 
 async def test_same_currency_same_amount_now_records_nothing(

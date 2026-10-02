@@ -21,15 +21,7 @@ from app.db.models import User
 router = Router(name="menu")
 
 # Sections of version 2 that are not built yet; each stage of docs/V2_PLAN.md removes some.
-COMING_SOON = frozenset(
-    {
-        MenuAction.TO_PAY,
-        MenuAction.TO_RECEIVE,
-        MenuAction.LOANS,
-        MenuAction.REPORTS,
-        MenuAction.CLOSE_DAY,
-    }
-)
+COMING_SOON = frozenset({MenuAction.REPORTS, MenuAction.CLOSE_DAY})
 
 
 @router.message(Command("menu"))

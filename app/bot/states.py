@@ -35,3 +35,15 @@ class ClientPick(StatesGroup):
     choose = State()  # recent clients, search prompt or results; typed text is a search
     new_name = State()
     new_comment = State()
+
+
+class SettleFlow(StatesGroup):
+    currency = State()  # started from the client card
+    amount = State()
+    confirm = State()
+
+
+class LoanFlow(StatesGroup):
+    amount = State()  # the client is chosen before, with the client picker
+    comment = State()
+    confirm = State()

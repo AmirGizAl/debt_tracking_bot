@@ -23,7 +23,7 @@ from app.bot.ui import (
 )
 from app.db.models import Client, User
 from app.domain import errors
-from app.services import clients
+from app.services import clients, ledger
 
 router = Router(name="clients")
 
@@ -82,12 +82,14 @@ async def clients_page(
     await answer(callback)
 
 
-async def render_card(
-    bot: Bot, callback: CallbackQuery, session: AsyncSession, client: Client
+async def show_card(
+    event: Message | CallbackQuery, bot: Bot, session: AsyncSession, client: Client
 ) -> None:
+    """TZ 13.6: name, comment, obligations of both books and the actions with the client."""
+    obligations = await ledger.client_obligations(session, client.id)
     can_delete = not await clients.has_operations(session, client.id)
-    await edit_or_send(
-        bot, callback.message, texts.client_card(client), kb.client_card(client, can_delete)
+    await show_screen(
+        event, bot, texts.client_card(client, obligations), kb.client_card(client, can_delete)
     )
 
 
@@ -103,8 +105,16 @@ async def open_client(
     if client is None:
         return
     await leave_scenario(callback, state, bot)
-    await render_card(bot, callback, session, client)
+    await show_card(callback, bot, session, client)
     await answer(callback)
+
+
+@router.callback_query(_action(ClientsAction.HISTORY))
+@router.callback_query(_action(ClientsAction.STATEMENT))
+async def coming_soon(callback: CallbackQuery) -> None:
+    # «История записей» comes with the record card (stage 6), «Выписка» with the reports
+    # (stage 8 of docs/V2_PLAN.md).
+    await answer(callback, texts.SECTION_SOON)
 
 
 # --- search ------------------------------------------------------------------------------------

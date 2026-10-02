@@ -13,6 +13,7 @@ from app.db.session import create_sessionmaker
 from app.services import days, users
 from tests.bot.harness import BOT_TOKEN, FakeTelegram, Harness, JsonMemoryStorage, UserClient
 from tests.conftest import OWNER_TG_ID, SECOND_OWNER_TG_ID
+from tests.services.accounting import KGS, USD, open_balance
 
 
 @pytest.fixture(scope="session")
@@ -70,3 +71,11 @@ async def owner_user(harness: Harness, session: AsyncSession) -> User:
     user = await users.get_active_by_telegram_id(session, OWNER_TG_ID)
     assert user is not None
     return user
+
+
+@pytest.fixture
+async def funded(session: AsyncSession, owner_user: User) -> User:
+    """TZ 17.1, scenario 1: 10 000 USD and 1 000 000 KGS; returns the owner."""
+    await open_balance(session, owner_user, "10000", USD)
+    await open_balance(session, owner_user, "1000000", KGS)
+    return owner_user

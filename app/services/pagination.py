@@ -48,3 +48,13 @@ async def paginate(
     else:
         items = [row_mapper(row) for row in await session.execute(limited)]
     return Page(items=items, page=page, total=total, page_size=page_size)
+
+
+def page_of[T](items: list[T], page: int, page_size: int = PAGE_SIZE) -> Page[T]:
+    """One page of a list already in memory; a page past the end shows the last one."""
+    pages = max(1, -(-len(items) // page_size))
+    page = min(max(page, 0), pages - 1)
+    start = page * page_size
+    return Page(
+        items=items[start : start + page_size], page=page, total=len(items), page_size=page_size
+    )
