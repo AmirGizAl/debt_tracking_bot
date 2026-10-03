@@ -12,10 +12,17 @@ from app.domain.entries import OperationType
 from app.domain.errors import DayAlreadyClosed, MissingRate, PermissionDenied
 from app.services import adjustments, days
 from tests.factories import make_client
-from tests.services.accounting import KGS, RUB, USD, D, loan, open_balance, settle, swap
-
-DAY_1_RATES = {USD: D("87.65"), RUB: D("0.991")}
-DAY_2_RATES = {USD: D("87.70"), RUB: D("0.99")}
+from tests.services.accounting import (
+    DAY_1_RATES,
+    DAY_2_RATES,
+    KGS,
+    USD,
+    D,
+    acceptance_day_1,
+    acceptance_day_2,
+    loan,
+    open_balance,
+)
 
 
 @pytest.fixture
@@ -26,19 +33,6 @@ async def day(session: AsyncSession) -> BusinessDay:
 @pytest.fixture
 async def azamat(session: AsyncSession, owner: User) -> Client:
     return await make_client(session, owner, "Азамат")
-
-
-async def day_1(session: AsyncSession, owner: User, azamat: Client) -> None:
-    """TZ 17.1, scenarios 1-5."""
-    bekzat = await make_client(session, owner, "Бекзат")
-    await open_balance(session, owner, "10000", USD)
-    await open_balance(session, owner, "1000000", KGS)
-    await swap(session, owner, "1000", USD, "87000", KGS, rate="87")
-    await swap(session, owner, "88000", KGS, "1000", USD, rate="88")
-    await swap(
-        session, owner, "88500", RUB, "1000", USD, rate="88.5", paid_now=False, client=azamat
-    )
-    await loan(session, owner, OperationType.LOAN_GIVE, bekzat, "50000")
 
 
 async def test_preliminary_report_saves_nothing(
@@ -62,9 +56,9 @@ async def test_preliminary_report_saves_nothing(
 
 
 async def test_closing_saves_the_day_and_opens_the_next(
-    session: AsyncSession, day: BusinessDay, owner: User, azamat: Client
+    session: AsyncSession, day: BusinessDay, owner: User
 ) -> None:
-    await day_1(session, owner, azamat)
+    await acceptance_day_1(session, owner)
     _, preliminary = await days.preliminary_report(session, DAY_1_RATES)
     assert preliminary.surplus == D("1053.50")  # TZ 17.1, scenario 7
 
@@ -89,13 +83,12 @@ async def test_closing_saves_the_day_and_opens_the_next(
 
 
 async def test_two_days_of_the_acceptance_scenarios(
-    session: AsyncSession, day: BusinessDay, owner: User, azamat: Client
+    session: AsyncSession, day: BusinessDay, owner: User
 ) -> None:
-    await day_1(session, owner, azamat)
+    people = await acceptance_day_1(session, owner)
     await days.close_day(session, owner, day.id, DAY_1_RATES)
     # TZ 17.1, scenarios 9-11.
-    await settle(session, owner, OperationType.EXCHANGE_PAYOUT, azamat, "1000", USD)
-    await swap(session, owner, "2000", USD, "175000", KGS, rate="87.5")
+    await acceptance_day_2(session, owner, people["Азамат"])
 
     closed = await days.close_day(session, owner, day.id + 1, DAY_2_RATES)
 

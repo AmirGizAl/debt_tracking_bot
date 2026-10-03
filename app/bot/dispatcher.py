@@ -18,6 +18,7 @@ from app.bot.handlers import (
     balances,
     client_picker,
     clients,
+    day_report,
     errors,
     exchange,
     fallback,
@@ -27,6 +28,7 @@ from app.bot.handlers import (
     opening,
     panel,
     records,
+    reports,
     settlements,
     start,
 )
@@ -102,6 +104,8 @@ def create_dispatcher(
         loans.router,
         records.router,
         adjustments.router,
+        reports.router,
+        day_report.router,
         balances.router,
         fallback.router,
     )

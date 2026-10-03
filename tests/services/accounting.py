@@ -10,6 +10,7 @@ from app.db.models import Client, Operation, User
 from app.domain.currency import Currency
 from app.domain.entries import ExchangeTerms, OperationType
 from app.services import adjustments, exchange, loans, opening, reversal, settlements
+from tests.factories import make_client
 
 USD, EUR, RUB, KZT, KGS = (
     Currency.USD,
@@ -106,3 +107,28 @@ async def force_close_day(session: AsyncSession, owner: User) -> None:
     )
     await session.execute(text("INSERT INTO business_days (status) VALUES ('open')"))
     await session.commit()
+
+
+DAY_1_RATES = {Currency.USD: D("87.65"), Currency.RUB: D("0.991")}
+DAY_2_RATES = {Currency.USD: D("87.70"), Currency.RUB: D("0.99")}
+
+
+async def acceptance_day_1(session: AsyncSession, owner: User) -> dict[str, Client]:
+    """TZ 17.1, scenarios 1-5: the state of the control example 8.6."""
+    azamat = await make_client(session, owner, "Азамат")
+    bekzat = await make_client(session, owner, "Бекзат")
+    await open_balance(session, owner, "10000", USD)
+    await open_balance(session, owner, "1000000", KGS)
+    await swap(session, owner, "1000", USD, "87000", KGS, rate="87")
+    await swap(session, owner, "88000", KGS, "1000", USD, rate="88")
+    await swap(
+        session, owner, "88500", RUB, "1000", USD, rate="88.5", paid_now=False, client=azamat
+    )
+    await loan(session, owner, OperationType.LOAN_GIVE, bekzat, "50000")
+    return {"Азамат": azamat, "Бекзат": bekzat}
+
+
+async def acceptance_day_2(session: AsyncSession, owner: User, azamat: Client) -> None:
+    """TZ 17.1, scenarios 9 and 10."""
+    await settle(session, owner, OperationType.EXCHANGE_PAYOUT, azamat, "1000", USD)
+    await swap(session, owner, "2000", USD, "175000", KGS, rate="87.5")

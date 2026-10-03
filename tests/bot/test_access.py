@@ -59,17 +59,6 @@ async def test_menu_shows_the_open_day(
     assert owner_client.last.text == "День №2. Выберите действие:"
 
 
-@pytest.mark.parametrize("action", [MenuAction.REPORTS, MenuAction.CLOSE_DAY])
-async def test_sections_of_later_stages_say_so(
-    owner_client: UserClient, action: MenuAction
-) -> None:
-    await owner_client.send("/menu")
-
-    answer = await owner_client.press(MenuCb(action=action).pack(), owner_client.last)
-
-    assert answer.text == texts.SECTION_SOON
-
-
 @pytest.mark.parametrize("data", ["m:cash", "m:lend", "r:op:3", "o:save:", "rp:k:summary"])
 async def test_buttons_of_version_1_are_stale(owner_client: UserClient, data: str) -> None:
     # A v1 "Открыть запись №3" must not open the unrelated record №3 of version 2.
