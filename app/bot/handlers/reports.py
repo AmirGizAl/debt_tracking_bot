@@ -20,16 +20,6 @@ from app.services import days, reports
 
 router = Router(name="reports")
 
-# Reports of stage 8 of docs/V2_PLAN.md.
-COMING_SOON = frozenset(
-    {
-        ReportsAction.WHO_OWES,
-        ReportsAction.JOURNAL,
-        ReportsAction.MOVEMENT,
-        ReportsAction.STATEMENT,
-    }
-)
-
 
 async def show_reports(event: Message | CallbackQuery, state: FSMContext, bot: Bot) -> None:
     await leave_any(event, state, bot)
@@ -43,9 +33,41 @@ async def open_reports(callback: CallbackQuery, state: FSMContext, bot: Bot) -> 
     await answer(callback)
 
 
-@router.callback_query(ReportsCb.filter(F.action.in_(COMING_SOON)))
-async def coming_soon(callback: CallbackQuery) -> None:
-    await answer(callback, texts.SECTION_SOON)
+# --- «Кто кому должен» (TZ 14.2) -----------------------------------------------------------------
+
+
+@router.callback_query(ReportsCb.filter(F.action == ReportsAction.WHO_OWES))
+async def who_owes(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None:
+    await leave_scenario(callback, state, bot)
+    text = f"{texts.report_title_html(texts.WHO_OWES_TITLE)}\n\n{texts.CHOOSE_FORMAT}"
+    await show_screen(callback, bot, text, kb.who_owes())
+    await answer(callback)
+
+
+@router.callback_query(ReportsCb.filter(F.action == ReportsAction.WHO_OWES_FILE))
+async def who_owes_file(
+    callback: CallbackQuery,
+    callback_data: ReportsCb,
+    bot: Bot,
+    session: AsyncSession,
+    user: User,
+    settings: Settings,
+) -> None:
+    """Obligations right now; a view: the file comes under the screen."""
+    if callback_data.fmt is None:
+        await answer(callback, texts.STALE_ACTION)
+        return
+    await answer(callback)
+    chat_id = chat_id_of(callback)
+    async with ChatActionSender.upload_document(bot=bot, chat_id=chat_id):
+        report = await reports.who_owes_file(
+            session,
+            callback_data.fmt,
+            generated_by=texts.user_name(user),
+            generated_at=datetime.now(settings.zone),
+            zone=settings.zone,
+        )
+    await bot.send_document(chat_id, BufferedInputFile(report.content, report.filename))
 
 
 # --- the archive (TZ 8.5) ------------------------------------------------------------------------

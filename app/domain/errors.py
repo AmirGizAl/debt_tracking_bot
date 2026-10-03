@@ -57,6 +57,10 @@ class EmptyText(DomainError):
     pass
 
 
+class InvalidDate(DomainError):
+    """Not a date in the format ДД.ММ.ГГГГ, or no such day (31.02)."""
+
+
 # --- users -----------------------------------------------------------------------------------
 
 

@@ -86,8 +86,6 @@ async def test_reports_screen(owner_client: UserClient) -> None:
         [texts.BTN_STATEMENT_REPORT],
         [texts.BTN_HOME],
     ]
-    for later in (texts.BTN_WHO_OWES, texts.BTN_JOURNAL, texts.BTN_MOVEMENT):
-        assert await owner_client.click(later) == texts.SECTION_SOON  # stage 8
 
 
 async def test_scenario_7_preliminary_report(

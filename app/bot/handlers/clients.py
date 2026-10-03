@@ -109,12 +109,6 @@ async def open_client(
     await answer(callback)
 
 
-@router.callback_query(_action(ClientsAction.STATEMENT))
-async def coming_soon(callback: CallbackQuery) -> None:
-    # «Выписка» comes with the reports (stage 8 of docs/V2_PLAN.md).
-    await answer(callback, texts.SECTION_SOON)
-
-
 # --- search ------------------------------------------------------------------------------------
 
 

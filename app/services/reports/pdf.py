@@ -27,7 +27,16 @@ from app.bot import texts
 from app.domain.currency import HOME_CURRENCY
 from app.domain.day_report import NameLine
 from app.domain.money import format_amount, format_money, format_rate, format_signed
-from app.services.reports.data import DayReportData, JournalRow, Money, ReportMeta
+from app.services.reports.data import (
+    DayReportData,
+    JournalData,
+    JournalRow,
+    Money,
+    MovementData,
+    ReportMeta,
+    StatementData,
+    WhoOwesData,
+)
 
 FONTS = Path(__file__).resolve().parents[2] / "assets" / "fonts"
 FONT, FONT_BOLD = "DejaVuSans", "DejaVuSans-Bold"
@@ -337,3 +346,108 @@ def day_report_pdf(data: DayReportData) -> bytes:
     story.append(_paragraph(texts.BLOCK_RECORDS, styles.heading))
     story.append(journal_table(small, data.records))
     return _build(story, data.meta, wide=True)
+
+
+MOVEMENT_WIDTHS = (30, 14, 123, 32, 32, 36)
+STATEMENT_WIDTHS = (28, 12, 70, 30, 40)
+CLIENT_WIDTHS = (110, 40)
+
+
+def _client_table(styles: _Styles, title: str, lines: list[NameLine]) -> list[Flowable]:
+    """ "Клиент | Сумма" with the total (TZ 14.2)."""
+    if not lines:
+        return []
+    total = sum((line.amount for line in lines), Decimal(0))
+    rows = [([line.name, format_amount(line.amount)], False) for line in lines]
+    rows.append(([texts.REPORT_TOTAL, format_amount(total)], False))
+    return [
+        _paragraph(title, styles.subheading),
+        _table(styles, texts.CLIENT_COLUMNS, rows, CLIENT_WIDTHS, {1}, {len(rows) - 1}),
+    ]
+
+
+def who_owes_pdf(data: WhoOwesData) -> bytes:
+    styles = _Styles()
+    story = _header(styles, data.meta)
+    story.append(_paragraph(texts.SECTION_EXCHANGES, styles.heading))
+    if not data.exchanges:
+        story.append(_paragraph(texts.NOBODY_OWES, styles.text))
+    for item in data.exchanges:
+        story += _client_table(styles, texts.owed_to_us_title(item.currency), item.owed_to_us)
+        story += _client_table(styles, texts.we_owe_title(item.currency), item.we_owe)
+    story.append(_paragraph(texts.BLOCK_LOANS, styles.heading))
+    if not (data.loans.owed_to_us or data.loans.we_owe):
+        story.append(_paragraph(texts.NOBODY_OWES, styles.text))
+    story += _client_table(styles, texts.owed_to_us_title(), data.loans.owed_to_us)
+    story += _client_table(styles, texts.we_owe_title(), data.loans.we_owe)
+    return _build(story, data.meta)
+
+
+def journal_pdf(data: JournalData) -> bytes:
+    styles = _Styles()
+    story = _header(styles, data.meta)
+    story.append(journal_table(_Styles(size=7), data.records))
+    return _build(story, data.meta, wide=True)
+
+
+def movement_pdf(data: MovementData) -> bytes:
+    styles = _Styles()
+    story = _header(styles, data.meta)
+    if not data.blocks:
+        story.append(_paragraph(texts.NO_MOVEMENTS, styles.text))
+    for block in data.blocks:
+        story.append(_paragraph(texts.movement_block_title(block.currency), styles.heading))
+        start = format_money(block.start, block.currency)
+        story.append(_paragraph(texts.balance_edge(texts.BALANCE_AT_START, start), styles.lead))
+        rows = [
+            (
+                [
+                    f"{row.time:%d.%m.%Y %H:%M}",
+                    row.number,
+                    row.description,
+                    _amount(row.incoming),
+                    _amount(row.outgoing),
+                    format_amount(row.balance),
+                ],
+                row.grey,
+            )
+            for row in block.rows
+        ]
+        if rows:
+            story.append(
+                _table(styles, texts.MOVEMENT_COLUMNS, rows, MOVEMENT_WIDTHS, {1, 3, 4, 5})
+            )
+        end = format_money(block.end, block.currency)
+        story.append(_paragraph(texts.balance_edge(texts.BALANCE_AT_END, end), styles.text))
+    return _build(story, data.meta, wide=True)
+
+
+def statement_pdf(data: StatementData) -> bytes:
+    styles = _Styles()
+    story = _header(styles, data.meta)
+    if not data.blocks:
+        story.append(_paragraph(texts.NO_STATEMENT, styles.text))
+    for block in data.blocks:
+        story.append(
+            _paragraph(texts.statement_block_title(block.book, block.currency), styles.heading)
+        )
+        start = texts.money_words(block.start, block.currency)
+        story.append(_paragraph(texts.balance_edge(texts.BALANCE_AT_START, start), styles.lead))
+        rows = [
+            (
+                [
+                    f"{row.time:%d.%m.%Y %H:%M}",
+                    row.number,
+                    row.operation,
+                    format_signed(row.change),
+                    texts.money_words(row.after, block.currency),
+                ],
+                row.grey,
+            )
+            for row in block.rows
+        ]
+        if rows:
+            story.append(_table(styles, texts.STATEMENT_COLUMNS, rows, STATEMENT_WIDTHS, {1, 3}))
+        end = texts.money_words(block.end, block.currency)
+        story.append(_paragraph(texts.balance_edge(texts.BALANCE_AT_END, end), styles.text))
+    return _build(story, data.meta)

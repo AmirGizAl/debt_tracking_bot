@@ -67,3 +67,13 @@ class DayReportFlow(StatesGroup):
 
     rate = State()
     check = State()  # the numbers with the closing or the format buttons
+
+
+class ReportFlow(StatesGroup):
+    """The journal, the movement of balances and the statement (TZ 13.10, 14)."""
+
+    period = State()
+    closed_day = State()
+    start_date = State()
+    end_date = State()
+    file = State()  # the period is known: «Excel» or «PDF»

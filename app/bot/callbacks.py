@@ -234,6 +234,7 @@ class ReportsAction(StrEnum):
     DAY = "day"  # day_id, page: a closed day of the archive
     DAY_FILE = "file"  # day_id, fmt
     WHO_OWES = "who"
+    WHO_OWES_FILE = "whof"  # fmt
     JOURNAL = "jr"
     MOVEMENT = "mv"
     STATEMENT = "stm"
@@ -261,4 +262,23 @@ class DayCb(CallbackData, prefix="dy"):
     """Rates, the preliminary report and the closing of the day; the current screen only."""
 
     action: DayAction
+    fmt: ReportFormat | None = None
+
+
+class ReportStep(StrEnum):
+    PERIOD = "per"  # value: a PeriodChoice
+    DAY = "day"  # day_id: a closed day
+    DAYS = "days"  # page of the closed days
+    FILE = "file"  # fmt
+    BACK = "back"
+
+
+class ReportStepCb(CallbackData, prefix="rs"):
+    """The journal, the movement of balances and the statement: period, then the file.
+    Valid only on the current scenario screen."""
+
+    action: ReportStep
+    value: str = ""
+    day_id: int = 0
+    page: int = 0
     fmt: ReportFormat | None = None
