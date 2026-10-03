@@ -1,25 +1,38 @@
-from datetime import date
+"""Dates of «Период по датам» (TZ 13.10)."""
+
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 import pytest
 
-from app.domain.dates import last_days
+from app.domain.dates import day_bounds, parse_date
+from app.domain.errors import InvalidDate
 
-TODAY = date(2026, 9, 27)
+MOSCOW = ZoneInfo("Europe/Moscow")
 
 
 @pytest.mark.parametrize(
-    ("days", "start"),
+    ("raw", "expected"),
     [
-        (1, TODAY),
-        (7, date(2026, 9, 21)),
-        (30, date(2026, 8, 29)),
-        (365, date(2025, 9, 28)),
+        ("01.10.2026", date(2026, 10, 1)),
+        (" 1.10.2026 ", date(2026, 10, 1)),
+        ("29.02.2028", date(2028, 2, 29)),
     ],
 )
-def test_last_days_include_today(days: int, start: date) -> None:
-    assert last_days(TODAY, days) == (start, TODAY)
-    assert (TODAY - start).days + 1 == days
+def test_dates_are_read(raw: str, expected: date) -> None:
+    assert parse_date(raw) == expected
 
 
-def test_last_days_cross_a_leap_day() -> None:
-    assert last_days(date(2028, 3, 1), 2) == (date(2028, 2, 29), date(2028, 3, 1))
+@pytest.mark.parametrize(
+    "raw", ["", "1.10.26", "2026-10-01", "01/10/2026", "31.02.2026", "29.02.2027", "01.13.2026"]
+)
+def test_wrong_dates_are_refused(raw: str) -> None:
+    with pytest.raises(InvalidDate):
+        parse_date(raw)
+
+
+def test_both_dates_of_a_period_are_included() -> None:
+    start, end = day_bounds(date(2026, 10, 1), date(2026, 10, 3), MOSCOW)
+
+    assert start == datetime(2026, 10, 1, tzinfo=MOSCOW)
+    assert end == datetime(2026, 10, 4, tzinfo=MOSCOW)

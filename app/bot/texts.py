@@ -32,7 +32,6 @@ CMD_CANCEL = "Прервать текущее действие"
 # --- Main menu (TZ 13.2) --------------------------------------------------------------------
 
 PANEL_GREETING = "Здравствуйте! Кнопки разделов всегда под рукой — на панели внизу экрана."
-SECTION_SOON = "Этот раздел появится в следующем обновлении бота."
 
 BTN_EXCHANGE = "Обмен"
 BTN_TO_PAY = "Ждут выдачи"
@@ -783,10 +782,20 @@ def _status_suffix(operation: Operation, reversed_by: int | None) -> str:
     return f" · {CANCELLED_MARK}" if reversed_by is not None else ""
 
 
+def record_line(
+    operation: Operation,
+    client_name: str | None,
+    reversed_by: int | None,
+    with_client: bool = True,
+) -> str:
+    """ "Обмен · Азамат · 88 500 RUB → 1 000 USD · отменена" (plain text, no escaping)."""
+    summary = record_summary(operation, client_name, with_client)
+    return f"{summary}{_status_suffix(operation, reversed_by)}"
+
+
 def record_button(operation: Operation, client_name: str | None, reversed_by: int | None) -> str:
     """A row of «Записи дня»: "№15 · Обмен · Азамат · 88 500 RUB → 1 000 USD · отменена"."""
-    summary = record_summary(operation, client_name)
-    return f"№{operation.id} · {summary}{_status_suffix(operation, reversed_by)}"
+    return f"№{operation.id} · {record_line(operation, client_name, reversed_by)}"
 
 
 def history_button(operation: Operation, reversed_by: int | None, zone: ZoneInfo) -> str:
@@ -1065,6 +1074,25 @@ def archive_day(day_number: int, closed_on: date, report: DayReport) -> str:
     return f"{numbers}\n\n{CHOOSE_FORMAT}"
 
 
+# --- Other reports: periods and formats (TZ 13.10, 14) ------------------------------------------
+
+ASK_PERIOD = "За какой период?"
+BTN_CURRENT_DAY = "Текущий день"
+BTN_CLOSED_DAY = "Закрытый день"
+BTN_DATES = "Период по датам"
+BTN_ALL_TIME = "Всё время"
+ASK_CLOSED_DAY = "Выберите закрытый день:"
+ASK_START_DATE = "Введите дату начала периода в формате ДД.ММ.ГГГГ, например 01.10.2026:"
+ASK_END_DATE = "Введите дату конца периода в формате ДД.ММ.ГГГГ, например 03.10.2026:"
+INVALID_DATE = "Не получилось прочитать дату. Введите её в формате ДД.ММ.ГГГГ, например 01.10.2026:"
+END_BEFORE_START = "Дата конца раньше даты начала. Введите дату конца ещё раз:"
+NO_CLOSED_DAYS = "Закрытых дней пока нет. Выберите другой период."
+
+
+def report_title_html(title: str) -> str:
+    return f"<b>{esc(title)}</b>"
+
+
 # --- Choosing a client inside a scenario (TZ 13.3 step 6, 13.5) --------------------------------
 
 CLIENT_QUESTION = "Клиент?"
@@ -1217,6 +1245,108 @@ def journal_status(reversed_by: int | None, reversal_of: int | None, reason: str
     if reversed_by is not None:
         return f"отменена записью №{reversed_by}"
     return ""
+
+
+WHO_OWES_TITLE = "Кто кому должен"
+JOURNAL_TITLE = "Журнал записей"
+MOVEMENT_TITLE = "Движение балансов"
+STATEMENT_TITLE = "Выписка по клиенту"
+SECTION_EXCHANGES = "По обменам"
+WHO_OWES_SHEET_EXCHANGES = "По обменам"
+WHO_OWES_SHEET_LOANS = "Долги в сомах"
+JOURNAL_SHEET = "Журнал"
+CLIENT_COLUMNS = ("Клиент", "Сумма")
+WHO_OWES_COLUMNS = ("Валюта", "Кто кому", "Клиент", "Сумма")
+MOVEMENT_COLUMNS = ("Время", "№", "Описание", "Приход", "Расход", "Остаток")
+STATEMENT_COLUMNS = ("Время", "№", "Операция", "Изменение", "Обязательство после")
+MOVEMENT_SHEET = "Движение"
+STATEMENT_SHEET = "Выписка"
+NO_MOVEMENTS = "За период движений нет."
+NO_STATEMENT = "За период записей с клиентом нет, обязательств нет."
+PERIOD_ALL_TIME = "Всё время"
+BALANCE_AT_START = "Остаток на начало"
+BALANCE_AT_END = "Остаток на конец"
+
+
+def statement_title(client_name: str) -> str:
+    return f"{STATEMENT_TITLE}: {client_name}"
+
+
+def who_owes_scope(moment: datetime) -> str:
+    return f"На {moment:%d.%m.%Y %H:%M}"
+
+
+def day_scope(day_number: int, closed_on: date | None) -> str:
+    """ "День №3 (открыт)" / "День №2 · закрыт 02.10.2026"."""
+    if closed_on is None:
+        return f"День №{day_number} (открыт)"
+    return f"День №{day_number} · закрыт {format_date(closed_on)}"
+
+
+def dates_scope(start: date, end: date) -> str:
+    if start == end:
+        return f"Дата: {format_date(start)}"
+    return f"Период: {format_date(start)} — {format_date(end)}"
+
+
+def movement_block_title(currency: Currency) -> str:
+    return f"{CASH_NAME} ({currency})" if currency == HOME_CURRENCY else str(currency)
+
+
+def movement_sheet_name(currency: Currency) -> str:
+    return f"{CASH_NAME} {currency}" if currency == HOME_CURRENCY else str(currency)
+
+
+def statement_block_title(book: Book, currency: Currency) -> str:
+    return "Долг в сомах" if book == Book.LOAN else f"{SECTION_EXCHANGES} · {currency}"
+
+
+def statement_sheet_name(book: Book, currency: Currency) -> str:
+    """Sheet names of Excel: up to 31 characters, no ":"."""
+    return "Долг в сомах" if book == Book.LOAN else f"Обмены {currency}"
+
+
+def money_words(amount: Decimal, currency: Currency) -> str:
+    """A balance of an obligation in words: "должен нам 1 000 USD" / "мы должны 500 RUB"."""
+    if amount > 0:
+        return f"должен нам {format_money(amount, currency)}"
+    if amount < 0:
+        return f"мы должны {format_money(-amount, currency)}"
+    return "обязательств нет"
+
+
+def balance_edge(label: str, value: str) -> str:
+    """ "Остаток на начало: 10 000 USD"."""
+    return f"{label}: {value}"
+
+
+def report_file_name(prefix: str, part: str, extension: str) -> str:
+    return f"{prefix}_{part}.{extension}"
+
+
+def file_part_moment(moment: datetime) -> str:
+    return f"{moment:%Y-%m-%d_%H%M}"
+
+
+def file_part_day(day_number: int, moment: datetime) -> str:
+    return f"день_{day_number}_{file_part_moment(moment)}"
+
+
+def file_part_dates(start: date, end: date) -> str:
+    if start == end:
+        return f"{start:%Y-%m-%d}"
+    return f"{start:%Y-%m-%d}_{end:%Y-%m-%d}"
+
+
+def file_part_all_time(moment: datetime) -> str:
+    return f"всё_время_{moment:%Y-%m-%d}"
+
+
+FILE_WHO_OWES = "Кто_кому_должен"
+FILE_JOURNAL = "Журнал"
+FILE_MOVEMENT = "Движение_балансов"
+FILE_STATEMENT = "Выписка"
+FILE_CLIENT_FALLBACK = "клиент"
 
 
 def day_report_file_name(day_number: int, closed_on: date, extension: str) -> str:

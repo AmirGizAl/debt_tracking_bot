@@ -132,3 +132,18 @@ async def acceptance_day_2(session: AsyncSession, owner: User, azamat: Client) -
     """TZ 17.1, scenarios 9 and 10."""
     await settle(session, owner, OperationType.EXCHANGE_PAYOUT, azamat, "1000", USD)
     await swap(session, owner, "2000", USD, "175000", KGS, rate="87.5")
+
+
+async def acceptance_day_3(
+    session: AsyncSession, owner: User, helper: User, bekzat: Client
+) -> Client:
+    """TZ 17.1, scenarios 12-14 (Айгуль is `helper`); returns Тимур."""
+    timur = await make_client(session, owner, "Тимур")
+    await swap(session, owner, "100000", RUB, "99000", RUB, paid_now=False, client=timur)
+    await swap(
+        session, owner, "99000", RUB, "98010", KGS, rate="0.99", received_now=False, client=timur
+    )
+    wrong = await loan(session, helper, OperationType.LOAN_REPAY_IN, bekzat, "5000")
+    await cancel(session, helper, wrong, "ошибка в сумме")
+    await loan(session, helper, OperationType.LOAN_REPAY_IN, bekzat, "50000")
+    return timur

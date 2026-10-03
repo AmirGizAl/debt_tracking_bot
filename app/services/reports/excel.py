@@ -20,8 +20,17 @@ from openpyxl.worksheet.worksheet import Worksheet
 
 from app.bot import texts
 from app.domain.currency import HOME_CURRENCY, Currency
-from app.domain.day_report import NameLine
-from app.services.reports.data import DayReportData, JournalRow, ReportMeta
+from app.domain.day_report import ExchangeList, NameLine
+from app.domain.money import format_money
+from app.services.reports.data import (
+    DayReportData,
+    JournalData,
+    JournalRow,
+    MovementData,
+    ReportMeta,
+    StatementData,
+    WhoOwesData,
+)
 
 MONEY_FORMAT = "#,##0.00"
 DATE_FORMAT = "DD.MM.YYYY"
@@ -239,13 +248,20 @@ def _report_sheet(sheet: Worksheet, data: DayReportData) -> None:
     _fit_columns(sheet, first)
 
 
-def _exchanges_sheet(sheet: Worksheet, data: DayReportData) -> None:
-    """Block 5: obligations of the exchanges by name, every currency in both directions."""
-    start = _meta(sheet, data.meta, [texts.BLOCK_EXCHANGES])
+def _obligations_sheet(
+    sheet: Worksheet,
+    meta: ReportMeta,
+    heading: str,
+    lists: list[ExchangeList],
+    columns: Sequence[str],
+) -> None:
+    """Obligations by name in one table: currency, direction, name, amount; a total for every
+    currency and direction."""
+    start = _meta(sheet, meta, [heading])
     rows: list[Row] = []
     bold: set[int] = set()
     formats: dict[int, Currency] = {}
-    for item in data.report.exchanges:
+    for item in lists:
         for direction, lines in (
             (texts.owed_to_us_title(), item.owed_to_us),
             (texts.we_owe_title(), item.we_owe),
@@ -260,7 +276,7 @@ def _exchanges_sheet(sheet: Worksheet, data: DayReportData) -> None:
                 rows.append(([str(item.currency), direction, texts.REPORT_TOTAL, total], False))
     if not rows:
         rows.append((["", "", texts.NOBODY_OWES, None], False))
-    _table(sheet, start, texts.EXCHANGE_COLUMNS, rows, money={4}, bold_rows=bold)
+    _table(sheet, start, columns, rows, money={4}, bold_rows=bold)
     for index, currency in formats.items():
         sheet.cell(start + 1 + index, 4).number_format = _money_format(currency)
     _fit_columns(sheet, start)
@@ -305,6 +321,132 @@ def day_report_xlsx(data: DayReportData) -> bytes:
     assert sheet is not None
     sheet.title = texts.DAY_REPORT_SHEET
     _report_sheet(sheet, data)
-    _exchanges_sheet(workbook.create_sheet(texts.EXCHANGES_SHEET), data)
+    _obligations_sheet(
+        workbook.create_sheet(texts.EXCHANGES_SHEET),
+        data.meta,
+        texts.BLOCK_EXCHANGES,
+        data.report.exchanges,
+        texts.EXCHANGE_COLUMNS,
+    )
     journal_sheet(workbook.create_sheet(texts.DAY_RECORDS_SHEET), data.meta, data.records)
+    return _save(workbook)
+
+
+def _signed_money_format(currency: Currency) -> str:
+    return f'+#,##0.00 "{currency}";-#,##0.00 "{currency}";0.00 "{currency}"'
+
+
+def _single_sheet(workbook: Workbook, title: str) -> Worksheet:
+    sheet = workbook.active
+    assert sheet is not None
+    sheet.title = title
+    return sheet
+
+
+def who_owes_xlsx(data: WhoOwesData) -> bytes:
+    """TZ 14.2: «По обменам» and «Долги в сомах», a sheet each."""
+    workbook = Workbook()
+    _obligations_sheet(
+        _single_sheet(workbook, texts.WHO_OWES_SHEET_EXCHANGES),
+        data.meta,
+        texts.SECTION_EXCHANGES,
+        data.exchanges,
+        texts.WHO_OWES_COLUMNS,
+    )
+    _obligations_sheet(
+        workbook.create_sheet(texts.WHO_OWES_SHEET_LOANS),
+        data.meta,
+        texts.BLOCK_LOANS,
+        [data.loans] if data.loans.owed_to_us or data.loans.we_owe else [],
+        texts.WHO_OWES_COLUMNS,
+    )
+    return _save(workbook)
+
+
+def journal_xlsx(data: JournalData) -> bytes:
+    """TZ 14.3."""
+    workbook = Workbook()
+    journal_sheet(_single_sheet(workbook, texts.JOURNAL_SHEET), data.meta, data.records)
+    return _save(workbook)
+
+
+def _edge_row(sheet: Worksheet, row: int, label: str, column: int, value: Any, fmt: str) -> None:
+    """ "Остаток на конец" under a table, its value in the column of balances."""
+    _labelled_value(sheet, row, label, (column, value))
+    sheet.cell(row, column).number_format = fmt
+
+
+def movement_xlsx(data: MovementData) -> bytes:
+    """TZ 14.4: a sheet for every balance: the start, the moves, the end."""
+    workbook = Workbook()
+    if not data.blocks:
+        sheet = _single_sheet(workbook, texts.MOVEMENT_SHEET)
+        _meta(sheet, data.meta, [texts.NO_MOVEMENTS])
+        return _save(workbook)
+    first = True
+    for block in data.blocks:
+        name = texts.movement_sheet_name(block.currency)
+        sheet = _single_sheet(workbook, name) if first else workbook.create_sheet(name)
+        first = False
+        fmt = _money_format(block.currency)
+        start_line = texts.balance_edge(
+            texts.BALANCE_AT_START, format_money(block.start, block.currency)
+        )
+        start = _meta(sheet, data.meta, [start_line])
+        rows: list[Row] = [
+            (
+                [row.time, row.number, row.description, row.incoming, row.outgoing, row.balance],
+                row.grey,
+            )
+            for row in block.rows
+        ]
+        last = _table(sheet, start, texts.MOVEMENT_COLUMNS, rows, money={4, 5, 6}, datetimes={1})
+        for index in range(start + 1, last + 1):
+            for column in (4, 5, 6):
+                sheet.cell(index, column).number_format = fmt
+        _edge_row(sheet, last + 1, texts.BALANCE_AT_END, 6, block.end, fmt)
+        _fit_columns(sheet, start)
+    return _save(workbook)
+
+
+def statement_xlsx(data: StatementData) -> bytes:
+    """TZ 14.5: a sheet for every book and currency of the client."""
+    workbook = Workbook()
+    if not data.blocks:
+        sheet = _single_sheet(workbook, texts.STATEMENT_SHEET)
+        _meta(sheet, data.meta, [texts.NO_STATEMENT])
+        return _save(workbook)
+    first = True
+    for block in data.blocks:
+        name = texts.statement_sheet_name(block.book, block.currency)
+        sheet = _single_sheet(workbook, name) if first else workbook.create_sheet(name)
+        first = False
+        heading = texts.statement_block_title(block.book, block.currency)
+        start_line = texts.balance_edge(
+            texts.BALANCE_AT_START, texts.money_words(block.start, block.currency)
+        )
+        start = _meta(sheet, data.meta, [heading, start_line])
+        rows: list[Row] = [
+            (
+                [
+                    row.time,
+                    row.number,
+                    row.operation,
+                    row.change,
+                    texts.money_words(row.after, block.currency),
+                ],
+                row.grey,
+            )
+            for row in block.rows
+        ]
+        last = _table(sheet, start, texts.STATEMENT_COLUMNS, rows, money={4}, datetimes={1})
+        for index in range(start + 1, last + 1):
+            sheet.cell(index, 4).number_format = _signed_money_format(block.currency)
+        _labelled_value(
+            sheet,
+            last + 1,
+            texts.BALANCE_AT_END,
+            (5, texts.money_words(block.end, block.currency)),
+        )
+        _fit_columns(sheet, start)
     return _save(workbook)
