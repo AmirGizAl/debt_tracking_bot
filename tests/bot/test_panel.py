@@ -56,6 +56,8 @@ async def test_helper_panel_has_no_owner_buttons(
         (texts.BTN_LOANS, "Долги в сомах"),
         (texts.BTN_CLIENTS, "Клиенты"),
         (texts.BTN_BALANCES, "Балансы · день №1"),
+        (texts.BTN_REPORTS, "Отчёты"),
+        (texts.BTN_CLOSE_DAY, "День №1 — проверка перед закрытием"),
         (texts.BTN_SETTINGS, "Настройки"),
     ],
 )
@@ -71,15 +73,6 @@ async def test_panel_button_opens_its_section(
     assert owner_client.last.text.splitlines()[0] == first_line
     assert len(owner_client.bot_messages) == messages_before + 1  # a new message
     assert menu.text == texts.main_menu(1)  # the old menu message is left alone
-
-
-@pytest.mark.parametrize("button", [texts.BTN_REPORTS, texts.BTN_CLOSE_DAY])
-async def test_sections_of_later_stages_say_so(owner_client: UserClient, button: str) -> None:
-    await owner_client.send("/start")
-
-    await owner_client.tap(button)
-
-    assert owner_client.last.text == texts.SECTION_SOON
 
 
 async def test_panel_interrupts_a_text_step(owner_client: UserClient) -> None:

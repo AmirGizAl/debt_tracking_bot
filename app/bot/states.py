@@ -60,3 +60,10 @@ class AdjustFlow(StatesGroup):
     amount = State()
     reason = State()
     confirm = State()
+
+
+class DayReportFlow(StatesGroup):
+    """The preliminary report and the closing of the day (TZ 7.2, 8.2, 8.3)."""
+
+    rate = State()
+    check = State()  # the numbers with the closing or the format buttons

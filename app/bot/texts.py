@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 from app.db.models import Client, Operation, User, UserStatus
 from app.domain.currency import HOME_CURRENCY, Currency
 from app.domain.dates import format_date, format_datetime, format_short_date
+from app.domain.day_report import DayReport
 from app.domain.entries import Book, OperationType
 from app.domain.errors import ConversionProblem, InsufficientBalance, NumberProblem
 from app.domain.money import format_amount, format_money, format_rate, format_signed
@@ -932,6 +933,138 @@ def confirm_adjustment(amount: Decimal, currency: Currency, reason: str, after: 
     )
 
 
+# --- Reports, the preliminary report, closing and the archive (TZ 7.2, 8, 13.9, 13.10) ----------
+
+REPORTS_TITLE = "<b>Отчёты</b>"
+BTN_PRELIMINARY = "Предварительный отчёт"
+BTN_ARCHIVE = "Архив закрытых дней"
+BTN_JOURNAL = "Журнал записей"
+BTN_MOVEMENT = "Движение балансов"
+BTN_STATEMENT_REPORT = "Выписка по клиенту"
+BTN_EXCEL = "Excel"
+BTN_PDF = "PDF"
+BTN_CHANGE_RATES = "Изменить курсы"
+BTN_DONT_CLOSE = "Не закрывать"
+ARCHIVE_TITLE = "<b>Архив закрытых дней</b>"
+ARCHIVE_EMPTY = "Закрытых дней пока нет."
+NEGATIVE_SURPLUS = "Внимание: излишки отрицательные. Проверьте записи и курсы."
+DAY_NOT_CLOSED = "День не закрыт."
+CHOOSE_FORMAT = "Выберите формат файла:"
+REPORT_SENT = "Файл отчёта отправлен."
+NEW_RATES_NEEDED = "Пока вы вводили курсы, появились записи в других валютах."
+REPORT_FILE_FAILED = "Не получилось отправить файл отчёта. Попробуйте ещё раз."
+
+
+def btn_close_day(number: int) -> str:
+    return f"Закрыть день №{number}"
+
+
+def btn_previous_rate(rate: Decimal) -> str:
+    return f"Как в прошлый раз: {format_rate(rate)}"
+
+
+def som_word(value: Decimal) -> str:
+    """ "сом" / "сома" / "сомов" after a number: "+1 315 сомов", "+1 053,50 сома"."""
+    if value != value.to_integral_value():
+        return "сома"
+    number = abs(int(value))
+    if number % 10 == 1 and number % 100 != 11:
+        return "сом"
+    if 2 <= number % 10 <= 4 and not 12 <= number % 100 <= 14:
+        return "сома"
+    return "сомов"
+
+
+def closing_title(day_number: int) -> str:
+    return f"<b>Закрытие дня №{day_number}</b>"
+
+
+def preliminary_step_title(day_number: int) -> str:
+    return f"<b>{BTN_PRELIMINARY} · день №{day_number}</b>"
+
+
+def preliminary_title(day_number: int, moment: datetime) -> str:
+    """TZ 8.3: «Предварительный отчёт · день №N · 02.10.2026 14:20»."""
+    return f"Предварительный отчёт · день №{day_number} · {moment:%d.%m.%Y %H:%M}"
+
+
+def check_title(day_number: int) -> str:
+    return f"День №{day_number} — проверка перед закрытием"
+
+
+def rates_entered(rates: dict[Currency, Decimal]) -> str | None:
+    """ "Курсы: USD 87,65, RUB 0,991" — what is entered so far."""
+    if not rates:
+        return None
+    return "Курсы: " + ", ".join(f"{c} {format_rate(rate)}" for c, rate in rates.items())
+
+
+def ask_report_rate(currency: Currency) -> str:
+    return rate_question(currency, HOME_CURRENCY)
+
+
+def day_check(title: str, report: DayReport) -> str:
+    """The key numbers of the day report (TZ 13.9): the check before closing, the preliminary
+    report in the chat."""
+    lines = [f"<b>{esc(title)}</b>"]
+    for line in report.lines:
+        if line.currency == HOME_CURRENCY:
+            if line.owed_to_us or line.we_owe:
+                lines.append(
+                    f"{KGS_OF_EXCHANGES}: {format_amount(line.owed_to_us)} − "
+                    f"{format_amount(line.we_owe)} = {format_amount(line.position)}"
+                )
+        elif line.rate is not None:
+            assert line.cash is not None
+            lines.append(
+                f"{line.currency}: {format_amount(line.cash)} + {format_amount(line.owed_to_us)}"
+                f" − {format_amount(line.we_owe)} = {format_amount(line.position)}"
+                f" × {format_rate(line.rate)} = {format_amount(line.kgs)}"
+            )
+    lines += [
+        f"{CASH_NAME}: {format_amount(report.cash_kgs)}",
+        f"Долги в сомах: нам {format_amount(report.loans_owed_to_us_total)}, "
+        f"мы {format_amount(report.loans_we_owe_total)}",
+        "",
+        f"Итог: {format_amount(report.total)}",
+        f"Начальная точка: {format_amount(report.baseline_total)}",
+        f"Излишки: {format_signed(report.surplus)}",
+        f"Изменение за день: {format_signed(report.change)}",
+    ]
+    if report.surplus < 0:
+        lines += ["", f"<b>{NEGATIVE_SURPLUS}</b>"]
+    return "\n".join(lines)
+
+
+def day_closed(day_number: int, surplus: Decimal, next_day: int) -> str:
+    """TZ 7.2 step 6: «День №N закрыт. Излишки: +1 053,50 сома. Начат день №N+1.»"""
+    return (
+        f"День №{day_number} закрыт. Излишки: {format_signed(surplus)} {som_word(surplus)}. "
+        f"Начат день №{next_day}."
+    )
+
+
+def day_closed_notice(day_number: int, surplus: Decimal, next_day: int, closer: User) -> str:
+    """To the other owners and to the group: the same, and who closed the day."""
+    closed = day_closed(day_number, surplus, next_day)
+    return f"{closed}\nЗакрыл: {esc(user_name_with_username(closer))}"
+
+
+def day_already_closed(day_number: int) -> str:
+    return f"День №{day_number} уже закрыт."
+
+
+def archive_button(day_number: int, closed_on: date, surplus: Decimal) -> str:
+    """ "День №3 · 02.10.2026 · +1 315"."""
+    return f"День №{day_number} · {format_date(closed_on)} · {format_signed(surplus)}"
+
+
+def archive_day(day_number: int, closed_on: date, report: DayReport) -> str:
+    """A closed day of the archive: the numbers of its snapshot."""
+    numbers = day_check(day_report_title(day_number, closed_on), report)
+    return f"{numbers}\n\n{CHOOSE_FORMAT}"
+
+
 # --- Choosing a client inside a scenario (TZ 13.3 step 6, 13.5) --------------------------------
 
 CLIENT_QUESTION = "Клиент?"
@@ -986,7 +1119,60 @@ def group_record_notice(operation: Operation, after: list[str], zone: ZoneInfo) 
     return "\n".join([*lines, "", heading, *after])
 
 
-# --- Report files (TZ 14) -------------------------------------------------------------------
+# --- Report files (TZ 8.4, 14) ---------------------------------------------------------------
+
+KGS_OF_EXCHANGES = "KGS (обмены)"
+NO_DASH = "—"
+REPORT_TOTAL = "Итого"
+DAY_REPORT_SHEET = "Отчёт"
+EXCHANGES_SHEET = "Обмены"
+DAY_RECORDS_SHEET = "Записи дня"
+BLOCK_CURRENCIES = "Валюты"
+BLOCK_CASH = "Наличка"
+BLOCK_LOANS = "Долги в сомах"
+BLOCK_RESULT = "Результат"
+BLOCK_EXCHANGES = "Обязательства по обменам"
+BLOCK_RECORDS = "Записи дня"
+CURRENCY_COLUMNS = (
+    "Валюта",
+    "Баланс",
+    "Нам должны",
+    "Мы должны",
+    "Остаток",
+    "Курс",
+    "В сомах",
+)
+CURRENCIES_TOTAL = "Итого по валютам"
+NAME_COLUMNS = ("Имя", "Сумма")
+EXCHANGE_COLUMNS = ("Валюта", "Кто кому", "Имя", "Сумма")
+RESULT_COLUMNS = ("Строка", "Значение")
+RESULT_TOTAL = "Итог"
+RESULT_BASELINE = "Начальная точка"
+RESULT_SURPLUS = "Излишки"
+RESULT_CHANGE = "Изменение за день"
+NOBODY_OWES = "Нет"
+JOURNAL_COLUMNS = (
+    "№",
+    "День",
+    "Время",
+    "Тип",
+    "Клиент",
+    "Отдаёт клиент",
+    "Получает клиент",
+    "Курс",
+    "Исполнение",
+    "Сумма",
+    "Комментарий или причина",
+    "Автор",
+    "Статус",
+)
+NO_RECORDS = "Записей нет"
+EXECUTION = {
+    (True, True): "сразу",
+    (True, False): "получено, выдача позже",
+    (False, True): "выдано, оплата позже",
+    (False, False): "обе стороны позже",
+}
 
 
 def report_generated_line(moment: datetime) -> str:
@@ -999,3 +1185,45 @@ def report_author_line(name: str) -> str:
 
 def report_page(number: int, total: int) -> str:
     return f"Страница {number} из {total}"
+
+
+def day_report_title(day_number: int, closed_on: date) -> str:
+    return f"Отчёт дня №{day_number} · {format_date(closed_on)}"
+
+
+def closed_by_line(name: str, moment: datetime) -> str:
+    return f"Закрыл: {name} · {moment:%d.%m.%Y %H:%M}"
+
+
+def baseline_line(currency: Currency, base: Decimal, rate: Decimal) -> str:
+    """ "USD: 10 000 × 87,65" (a part of «Начальная точка»); som without a rate."""
+    if currency == HOME_CURRENCY:
+        return f"{currency}: {format_amount(base)}"
+    return f"{currency}: {format_amount(base)} × {format_rate(rate)}"
+
+
+def owed_to_us_title(currency: Currency | None = None) -> str:
+    return f"{currency} · нам должны" if currency else "Нам должны"
+
+
+def we_owe_title(currency: Currency | None = None) -> str:
+    return f"{currency} · мы должны" if currency else "Мы должны"
+
+
+def journal_status(reversed_by: int | None, reversal_of: int | None, reason: str | None) -> str:
+    """TZ 14.3: empty, «отменена записью №M» or «отмена записи №N (причина)»."""
+    if reversal_of is not None:
+        return f"{reversal_mark(reversal_of)} ({reason})"
+    if reversed_by is not None:
+        return f"отменена записью №{reversed_by}"
+    return ""
+
+
+def day_report_file_name(day_number: int, closed_on: date, extension: str) -> str:
+    """ "Отчёт_дня_15_2026-10-02.xlsx" (TZ 14)."""
+    return f"Отчёт_дня_{day_number}_{closed_on:%Y-%m-%d}.{extension}"
+
+
+def preliminary_file_name(day_number: int, moment: datetime, extension: str) -> str:
+    """ "Предварительный_отчёт_день_15_2026-10-02_1420.xlsx" (docs/decisions.md, 21)."""
+    return f"Предварительный_отчёт_день_{day_number}_{moment:%Y-%m-%d_%H%M}.{extension}"

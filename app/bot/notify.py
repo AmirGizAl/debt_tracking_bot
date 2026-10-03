@@ -5,16 +5,20 @@ caused it, so they go out after the user has got the result and never raise.
 """
 
 import logging
+from datetime import datetime
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramAPIError, TelegramMigrateToChat
-from aiogram.types import InlineKeyboardMarkup
+from aiogram.types import BufferedInputFile, InlineKeyboardMarkup
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.bot import changes, texts
 from app.config import Settings
+from app.db.models import User
 from app.domain.entries import LOAN_TYPES
-from app.services import ledger, users
+from app.services import ledger, reports, users
+from app.services.days import ClosedDay
+from app.services.reports.data import ReportFormat
 
 logger = logging.getLogger(__name__)
 
@@ -76,3 +80,39 @@ async def post_record(bot: Bot, settings: Settings, session: AsyncSession, recor
         logger.exception("Cannot prepare the group post about record %s", record_id)
         return
     await notify_group(bot, settings, texts.group_record_notice(operation, after, settings.zone))
+
+
+async def send_day_report(
+    bot: Bot, session: AsyncSession, settings: Settings, closed: ClosedDay, closer: User
+) -> None:
+    """TZ 7.2 step 5, 13.11: Excel and PDF of the closed day to every active owner; the other
+    owners also get the message about the closing. The archive keeps the report anyway."""
+    generated_at = datetime.now(settings.zone)
+    files = []
+    for fmt in ReportFormat:
+        try:
+            files.append(
+                await reports.closed_day_file(
+                    session,
+                    closed.day.id,
+                    fmt,
+                    generated_by=texts.user_name(closer),
+                    generated_at=generated_at,
+                    zone=settings.zone,
+                )
+            )
+        except Exception:
+            logger.exception("Cannot build the %s report of day %s", fmt, closed.day.id)
+    notice = texts.day_closed_notice(
+        closed.day.id, closed.report.surplus, closed.next_day_id, closer
+    )
+    for owner in await users.active_owners(session):
+        assert owner.telegram_id is not None
+        try:
+            if owner.id != closer.id:
+                await bot.send_message(owner.telegram_id, notice)
+            for file in files:
+                document = BufferedInputFile(file.content, file.filename)
+                await bot.send_document(owner.telegram_id, document)
+        except TelegramAPIError as exc:
+            logger.warning("Cannot send the day report to the owner %s: %s", owner.telegram_id, exc)

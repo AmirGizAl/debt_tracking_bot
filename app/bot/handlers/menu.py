@@ -20,9 +20,6 @@ from app.db.models import User
 
 router = Router(name="menu")
 
-# Sections of version 2 that are not built yet; each stage of docs/V2_PLAN.md removes some.
-COMING_SOON = frozenset({MenuAction.REPORTS, MenuAction.CLOSE_DAY})
-
 
 @router.message(Command("menu"))
 async def cmd_menu(
@@ -54,11 +51,6 @@ async def to_home(
     await state.clear()
     await edit_or_send(bot, callback.message, await menu_text(session), main_menu(user))
     await answer(callback)
-
-
-@router.callback_query(MenuCb.filter(F.action.in_(COMING_SOON)))
-async def coming_soon(callback: CallbackQuery) -> None:
-    await answer(callback, texts.SECTION_SOON)
 
 
 @router.callback_query(NoopCb.filter())

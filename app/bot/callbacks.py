@@ -11,6 +11,7 @@ from aiogram.filters.callback_data import CallbackData
 
 from app.domain.currency import Currency
 from app.domain.entries import OperationType
+from app.services.reports.data import ReportFormat
 
 
 class MenuAction(StrEnum):
@@ -224,3 +225,40 @@ class AdjustCb(CallbackData, prefix="ad"):
     action: AdjustAction
     currency: Currency | None = None
     adding: bool = True
+
+
+class ReportsAction(StrEnum):
+    SHOW = "show"
+    PRELIMINARY = "pre"
+    ARCHIVE = "arc"  # page
+    DAY = "day"  # day_id, page: a closed day of the archive
+    DAY_FILE = "file"  # day_id, fmt
+    WHO_OWES = "who"
+    JOURNAL = "jr"
+    MOVEMENT = "mv"
+    STATEMENT = "stm"
+
+
+class ReportsCb(CallbackData, prefix="rpt"):
+    """«Отчёты» and the archive (TZ 13.10): views, always valid. Not "rp": that one is retired."""
+
+    action: ReportsAction
+    day_id: int = 0
+    page: int = 0
+    fmt: ReportFormat | None = None
+
+
+class DayAction(StrEnum):
+    LAST_RATE = "last"  # «Как в прошлый раз»
+    CLOSE = "close"  # «Закрыть день №N»
+    CHANGE_RATES = "rates"
+    DONT_CLOSE = "no"
+    FILE = "file"  # fmt: the file of the preliminary report
+    BACK = "back"
+
+
+class DayCb(CallbackData, prefix="dy"):
+    """Rates, the preliminary report and the closing of the day; the current screen only."""
+
+    action: DayAction
+    fmt: ReportFormat | None = None
