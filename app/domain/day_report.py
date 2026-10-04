@@ -4,12 +4,16 @@ For each of USD, EUR, RUB, KZT:  pos(c) = cash(c) + rec(c) − pay(c),  kgs(c) =
 KGS of exchanges:               pos_kgs = rec(KGS) − pay(KGS)   (without the som cash, rate 1)
 Total    = Σ kgs(c) + pos_kgs + cash(KGS) + loans owed to us − loans we owe
 Baseline = Σ round(base(c) × rate(c)) + base(KGS)        (the same rates as the report)
+         + Σ round(debt(c) × rate(c)) + debt(KGS)        (opening debts, agreed on 03.10.2026)
 Surplus  = Total − Baseline;  Change = Surplus − Surplus of the previous closed day.
+
+An opening debt enters both the total (through the obligations) and the baseline, so on its
+own it never shows as a surplus, like an opening balance.
 """
 
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import ROUND_HALF_UP, Decimal, localcontext
 from typing import Any
 
@@ -42,6 +46,8 @@ class ReportInputs:
     exchange: Sequence[Obligation]  # book `exchange`, any currency
     loans: Sequence[Obligation]  # book `loan`, KGS
     baseline: Mapping[Currency, Decimal]
+    # Opening debts of both books by currency: above zero the clients owe us (03.10.2026).
+    debts: Mapping[Currency, Decimal] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -94,6 +100,7 @@ class DayReport:
     change: Decimal
     exchanges: list[ExchangeList]
     rates: dict[Currency, Decimal]
+    baseline_debts: list[BaselineLine] = field(default_factory=list)  # a part of the baseline
 
     @property
     def loans_owed_to_us_total(self) -> Decimal:
@@ -126,13 +133,16 @@ def _names(obligations: Sequence[Obligation], positive: bool) -> list[NameLine]:
 
 
 def needed_rates(inputs: ReportInputs) -> list[Currency]:
-    """TZ 8.2: a rate is asked for every currency with pos(c) ≠ 0 or base(c) ≠ 0."""
+    """TZ 8.2: a rate is asked for every currency with pos(c) ≠ 0 or base(c) ≠ 0, and for the
+    currencies of opening debts (03.10.2026): every line of the baseline needs its rate."""
     split = _split(inputs.exchange)
     result = []
     for currency in FOREIGN_CURRENCIES:
         rec, pay = split.get(currency, (ZERO, ZERO))
         position = inputs.cash.get(currency, ZERO) + rec - pay
-        if position != 0 or inputs.baseline.get(currency, ZERO) != 0:
+        base = inputs.baseline.get(currency, ZERO)
+        debt = inputs.debts.get(currency, ZERO)
+        if position != 0 or base != 0 or debt != 0:
             result.append(currency)
     return result
 
@@ -177,7 +187,15 @@ def build_day_report(
     base_kgs = inputs.baseline.get(HOME_CURRENCY, ZERO)
     if base_kgs != 0:
         baseline.append(BaselineLine(HOME_CURRENCY, base_kgs, Decimal(1), base_kgs))
-    baseline_total = sum((line.kgs for line in baseline), ZERO)
+    debts = [
+        BaselineLine(c, inputs.debts[c], rates[c], _to_kgs(inputs.debts[c], rates[c]))
+        for c in FOREIGN_CURRENCIES
+        if inputs.debts.get(c, ZERO) != 0
+    ]
+    debt_kgs = inputs.debts.get(HOME_CURRENCY, ZERO)
+    if debt_kgs != 0:
+        debts.append(BaselineLine(HOME_CURRENCY, debt_kgs, Decimal(1), debt_kgs))
+    baseline_total = sum((line.kgs for line in [*baseline, *debts]), ZERO)
     surplus = total - baseline_total
 
     exchanges = []
@@ -200,6 +218,7 @@ def build_day_report(
         change=surplus - previous_surplus,
         exchanges=exchanges,
         rates={c: rates[c] for c in needed},
+        baseline_debts=debts,
     )
 
 
@@ -222,6 +241,30 @@ def _names_from(data: list[dict[str, str]]) -> list[NameLine]:
     return [NameLine(item["name"], Decimal(item["amount"])) for item in data]
 
 
+def _baseline_json(lines: list[BaselineLine]) -> list[dict[str, str]]:
+    return [
+        {
+            "currency": str(line.currency),
+            "base": str(line.base),
+            "rate": str(line.rate),
+            "kgs": str(line.kgs),
+        }
+        for line in lines
+    ]
+
+
+def _baseline_from(data: list[dict[str, str]]) -> list[BaselineLine]:
+    return [
+        BaselineLine(
+            Currency(line["currency"]),
+            Decimal(line["base"]),
+            Decimal(line["rate"]),
+            Decimal(line["kgs"]),
+        )
+        for line in data
+    ]
+
+
 def report_to_json(report: DayReport) -> dict[str, Any]:
     """Decimals as strings: JSON numbers would lose the exact cents."""
     return {
@@ -242,15 +285,8 @@ def report_to_json(report: DayReport) -> dict[str, Any]:
         "loans_owed_to_us": _names_json(report.loans_owed_to_us),
         "loans_we_owe": _names_json(report.loans_we_owe),
         "total": str(report.total),
-        "baseline": [
-            {
-                "currency": str(line.currency),
-                "base": str(line.base),
-                "rate": str(line.rate),
-                "kgs": str(line.kgs),
-            }
-            for line in report.baseline
-        ],
+        "baseline": _baseline_json(report.baseline),
+        "baseline_debts": _baseline_json(report.baseline_debts),
         "baseline_total": str(report.baseline_total),
         "surplus": str(report.surplus),
         "change": str(report.change),
@@ -285,15 +321,7 @@ def report_from_json(data: Mapping[str, Any]) -> DayReport:
         loans_owed_to_us=_names_from(data["loans_owed_to_us"]),
         loans_we_owe=_names_from(data["loans_we_owe"]),
         total=Decimal(data["total"]),
-        baseline=[
-            BaselineLine(
-                Currency(line["currency"]),
-                Decimal(line["base"]),
-                Decimal(line["rate"]),
-                Decimal(line["kgs"]),
-            )
-            for line in data["baseline"]
-        ],
+        baseline=_baseline_from(data["baseline"]),
         baseline_total=Decimal(data["baseline_total"]),
         surplus=Decimal(data["surplus"]),
         change=Decimal(data["change"]),
@@ -306,4 +334,6 @@ def report_from_json(data: Mapping[str, Any]) -> DayReport:
             for item in data["exchanges"]
         ],
         rates={Currency(c): Decimal(rate) for c, rate in data["rates"].items()},
+        # Snapshots made before 03.10.2026 have no opening debts.
+        baseline_debts=_baseline_from(data.get("baseline_debts", [])),
     )

@@ -16,6 +16,7 @@ from app.domain.entries import (
     exchange_draft,
     loan_draft,
     obligation,
+    opening_debt_draft,
     opening_draft,
     settlement_draft,
 )
@@ -217,3 +218,31 @@ def test_reversed_entry_flips_the_sign() -> None:
     entry = obligation(AZAMAT, EXCHANGE, USD, D("-1000"))
 
     assert entry.reversed() == obligation(AZAMAT, EXCHANGE, USD, D("1000"))
+
+
+@pytest.mark.parametrize(
+    ("book", "currency", "amount", "op_type"),
+    [
+        (EXCHANGE, USD, "-1000", OperationType.OPENING_DEBT),  # we owe Азамат 1 000 USD
+        (EXCHANGE, KGS, "5000", OperationType.OPENING_DEBT),
+        (LOAN, KGS, "50000", OperationType.OPENING_LOAN),
+    ],
+)
+def test_opening_debt_moves_no_money(
+    book: Book, currency: Currency, amount: str, op_type: OperationType
+) -> None:
+    # Agreed on 03.10.2026: only the obligation, the balances stay as they are.
+    draft = opening_debt_draft(AZAMAT, book, currency, D(amount))
+
+    assert draft.entries == (obligation(AZAMAT, book, currency, D(amount)),)
+    assert cash_changes(draft.entries) == {}
+    assert (draft.type, draft.client_id, draft.amount) == (op_type, AZAMAT, D(amount))
+
+
+def test_broken_opening_debts_are_refused() -> None:
+    with pytest.raises(ClientRequired):
+        opening_debt_draft(None, EXCHANGE, USD, D("100"))
+    with pytest.raises(InvalidOperationData):
+        opening_debt_draft(AZAMAT, EXCHANGE, USD, D("0"))
+    with pytest.raises(InvalidOperationData):
+        opening_debt_draft(AZAMAT, LOAN, USD, D("100"))  # som loans are in KGS only

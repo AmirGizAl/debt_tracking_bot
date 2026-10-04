@@ -13,7 +13,7 @@ from app.db.models import Client, Operation, User, UserStatus
 from app.domain.currency import HOME_CURRENCY, Currency
 from app.domain.dates import format_date, format_datetime, format_short_date
 from app.domain.day_report import DayReport
-from app.domain.entries import Book, OperationType
+from app.domain.entries import OPENING_DEBT_TYPES, Book, OperationType
 from app.domain.errors import ConversionProblem, InsufficientBalance, NumberProblem
 from app.domain.money import format_amount, format_money, format_rate, format_signed
 from app.domain.warnings import RecordWarning, WarningKind
@@ -393,6 +393,7 @@ def record_saved(number: int) -> str:
 # --- Opening balances (TZ 9, 13.11) ------------------------------------------------------------
 
 BTN_OPENING = "Начальные балансы"
+BTN_OPENING_DEBTS = "Начальные долги"
 BTN_ENTER = "Внести"
 BTN_SAVE = "Сохранить"
 BTN_DONT_SAVE = "Не сохранять"
@@ -443,6 +444,76 @@ def opening_exists(currency: Currency) -> str:
     return (
         f"Начальный баланс {currency} уже внесён. Чтобы исправить его, отмените ту запись "
         "и внесите заново."
+    )
+
+
+# --- Opening debts (agreed with the customer on 03.10.2026) -------------------------------------
+
+OPENING_DEBTS_TITLE = "<b>Начальные долги</b>"
+OPENING_DEBTS_HINT = (
+    "Долги, которые были до начала работы с ботом: кто должен вам и кому должны вы. Балансы "
+    "при этом не меняются, а излишков такие долги не дают: они входят в начальную точку."
+)
+OPENING_DEBTS_EMPTY = "Начальных долгов пока нет."
+OPENING_DEBTS_OPEN_HINT = "Нажмите на долг, чтобы открыть запись: её можно отменить."
+OPENING_DEBT_TITLE = "<b>Начальный долг</b>"
+ASK_DEBT_CURRENCY = "В какой валюте долг?"
+ASK_DEBT_BOOK = "Это долг в сомах или долг по обмену?"
+BTN_BOOK_LOAN = "Долг в сомах"
+BTN_BOOK_EXCHANGE = "По обменам"
+ASK_DEBT_DIRECTION = "Кто кому должен?"
+BTN_OWED_TO_US = "Клиент должен нам"
+BTN_WE_OWE = "Мы должны клиенту"
+BALANCES_UNCHANGED = "Балансы не меняются."
+
+
+def opening_debts_screen(total: int) -> str:
+    if total == 0:
+        return f"{OPENING_DEBTS_TITLE}\n{OPENING_DEBTS_EMPTY}\n\n{OPENING_DEBTS_HINT}"
+    return (
+        f"{OPENING_DEBTS_TITLE}\nВсего: {total}\n\n{OPENING_DEBTS_HINT}\n{OPENING_DEBTS_OPEN_HINT}"
+    )
+
+
+def book_line(book: Book) -> str:
+    return BTN_BOOK_LOAN if book == Book.LOAN else BTN_BOOK_EXCHANGE
+
+
+def debt_words(book: Book, currency: Currency, amount: Decimal) -> str:
+    """ "мы должны 1 000 USD" / "должен нам 50 000 KGS (долг в сомах)"."""
+    suffix = " (долг в сомах)" if book == Book.LOAN else ""
+    return f"{money_words(amount, currency)}{suffix}"
+
+
+def opening_debt_button(name: str, book: Book, currency: Currency, amount: Decimal) -> str:
+    """ "Азамат · мы должны 1 000 USD" (button texts are not HTML)."""
+    return f"{name} · {debt_words(book, currency, amount)}"
+
+
+def ask_debt_amount(currency: Currency) -> str:
+    return f"Какая сумма долга ({currency})?"
+
+
+def confirm_opening_debt(
+    client_name: str, book: Book, currency: Currency, amount: Decimal, after: list[str]
+) -> str:
+    return "\n".join(
+        [
+            "<b>Проверьте начальный долг</b>",
+            client_line(client_name),
+            f"Долг: {debt_words(book, currency, amount)}",
+            BALANCES_UNCHANGED,
+            "",
+            "<b>После сохранения:</b>",
+            *after,
+        ]
+    )
+
+
+def opening_debt_exists(client_name: str, currency: Currency) -> str:
+    return (
+        f"У клиента {esc(client_name)} уже есть начальный долг в {currency}. Чтобы исправить "
+        "его, отмените ту запись и внесите заново."
     )
 
 
@@ -731,6 +802,8 @@ TYPE_LABEL = {
     **LOAN_LABEL,
     OperationType.ADJUSTMENT: "Корректировка",
     OperationType.OPENING: "Начальный баланс",
+    OperationType.OPENING_DEBT: "Начальный долг по обменам",
+    OperationType.OPENING_LOAN: "Начальный долг в сомах",
 }
 BTN_OPEN_RECORD = "Открыть запись"
 BTN_CANCEL_RECORD = "Отменить запись"
@@ -764,6 +837,8 @@ def _money_of(operation: Operation) -> str:
     assert operation.amount is not None and operation.currency is not None
     if operation.type == OperationType.ADJUSTMENT:
         return f"{format_signed(operation.amount)} {operation.currency}"
+    if operation.type in OPENING_DEBT_TYPES:
+        return money_words(operation.amount, operation.currency)
     return format_money(operation.amount, operation.currency)
 
 
@@ -836,7 +911,8 @@ def record_body(operation: Operation) -> list[str]:
             )
     else:
         lines = [client_line(client)] if client is not None else []
-        lines.append(f"Сумма: {_money_of(operation)}")
+        label = "Долг" if operation.type in OPENING_DEBT_TYPES else "Сумма"
+        lines.append(f"{label}: {_money_of(operation)}")
     if operation.comment:
         lines.append(f"Комментарий: {esc(operation.comment)}")
     if operation.reason:
@@ -1221,6 +1297,13 @@ def day_report_title(day_number: int, closed_on: date) -> str:
 
 def closed_by_line(name: str, moment: datetime) -> str:
     return f"Закрыл: {name} · {moment:%d.%m.%Y %H:%M}"
+
+
+def baseline_debt_line(currency: Currency, amount: Decimal, rate: Decimal) -> str:
+    """ "долги USD: −1 000 × 87,65": the opening debts in the starting point (03.10.2026)."""
+    if currency == HOME_CURRENCY:
+        return f"долги {currency}: {format_amount(amount)}"
+    return f"долги {currency}: {format_amount(amount)} × {format_rate(rate)}"
 
 
 def baseline_line(currency: Currency, base: Decimal, rate: Decimal) -> str:

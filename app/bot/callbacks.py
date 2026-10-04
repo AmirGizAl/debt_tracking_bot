@@ -10,7 +10,7 @@ from enum import StrEnum
 from aiogram.filters.callback_data import CallbackData
 
 from app.domain.currency import Currency
-from app.domain.entries import OperationType
+from app.domain.entries import Book, OperationType
 from app.services.reports.data import ReportFormat
 
 
@@ -282,3 +282,24 @@ class ReportStepCb(CallbackData, prefix="rs"):
     day_id: int = 0
     page: int = 0
     fmt: ReportFormat | None = None
+
+
+class OpeningDebtAction(StrEnum):
+    SHOW = "show"  # page
+    ENTER = "enter"
+    CURRENCY = "cur"  # currency
+    BOOK = "book"  # book
+    DIRECTION = "dir"  # owed
+    SAVE = "save"
+    DONT_SAVE = "no"
+    BACK = "back"
+
+
+class OpeningDebtCb(CallbackData, prefix="od"):
+    """«Начальные долги» in the settings (03.10.2026); scenario steps only on the current screen."""
+
+    action: OpeningDebtAction
+    currency: Currency | None = None
+    book: Book | None = None
+    owed: bool = True  # the client owes us
+    page: int = 0

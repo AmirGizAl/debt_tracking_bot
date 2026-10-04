@@ -25,7 +25,7 @@ from app.domain.day_report import (
 )
 from app.domain.entries import Book
 from app.domain.errors import DayAlreadyClosed, DayNotFound
-from app.services import ledger, opening
+from app.services import ledger, opening, opening_debts
 from app.services.pagination import Page, paginate
 from app.services.transactions import isolated
 from app.services.users import require_owner
@@ -62,7 +62,7 @@ async def open_day_number(session: AsyncSession) -> int:
 
 
 async def report_inputs(session: AsyncSession) -> ReportInputs:
-    """Balances, obligations of both books and opening balances right now."""
+    """Balances, obligations of both books, opening balances and opening debts right now."""
 
     async def book(name: Book) -> list[Obligation]:
         return [
@@ -75,6 +75,7 @@ async def report_inputs(session: AsyncSession) -> ReportInputs:
         exchange=await book(Book.EXCHANGE),
         loans=await book(Book.LOAN),
         baseline=await opening.baseline(session),
+        debts=await opening_debts.debt_baseline(session),
     )
 
 

@@ -77,3 +77,13 @@ class ReportFlow(StatesGroup):
     start_date = State()
     end_date = State()
     file = State()  # the period is known: «Excel» or «PDF»
+
+
+class OpeningDebtFlow(StatesGroup):
+    """«Начальные долги» (03.10.2026); the client is chosen before, with the client picker."""
+
+    currency = State()
+    book = State()  # KGS only: a som loan or an obligation of the exchanges
+    direction = State()
+    amount = State()
+    confirm = State()

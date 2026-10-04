@@ -230,6 +230,10 @@ def _report_sheet(sheet: Worksheet, data: DayReportData) -> None:
         for line in report.baseline
     ]
     result += [
+        ([f"· {texts.baseline_debt_line(line.currency, line.base, line.rate)}", line.kgs], False)
+        for line in report.baseline_debts
+    ]
+    result += [
         ([texts.RESULT_SURPLUS, report.surplus], False),
         ([texts.RESULT_CHANGE, report.change], False),
     ]

@@ -140,6 +140,14 @@ class OpeningExists(DomainError):
         self.currency = currency
 
 
+class OpeningDebtExists(DomainError):
+    """The client already has an opening debt in this book and currency (03.10.2026)."""
+
+    def __init__(self, currency: Currency) -> None:
+        super().__init__(str(currency))
+        self.currency = currency
+
+
 class OperationNotFound(NotFound):
     pass
 
