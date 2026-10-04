@@ -27,6 +27,9 @@ class OperationType(StrEnum):
     LOAN_REPAY_OUT = "loan_repay_out"
     ADJUSTMENT = "adjustment"
     OPENING = "opening"
+    # Debts from before the bot (agreed on 03.10.2026): an obligation without money.
+    OPENING_DEBT = "opening_debt"  # book `exchange`, any currency
+    OPENING_LOAN = "opening_loan"  # book `loan`, KGS
 
 
 class EntryKind(StrEnum):
@@ -50,6 +53,11 @@ LOAN_TYPES = frozenset(
     }
 )
 SETTLEMENT_TYPES = frozenset({OperationType.EXCHANGE_PAYOUT, OperationType.EXCHANGE_RECEIPT})
+OPENING_DEBT_TYPES = frozenset({OperationType.OPENING_DEBT, OperationType.OPENING_LOAN})
+OPENING_DEBT_TYPE = {
+    Book.EXCHANGE: OperationType.OPENING_DEBT,
+    Book.LOAN: OperationType.OPENING_LOAN,
+}
 
 # Sign of the obligation change; the balance moves the other way (TZ 6.3).
 OBLIGATION_SIGN = {
@@ -258,6 +266,29 @@ def opening_draft(currency: Currency, amount: Decimal) -> Draft:
     return Draft(
         type=OperationType.OPENING,
         entries=(cash(currency, amount),),
+        currency=currency,
+        amount=amount,
+    )
+
+
+def opening_debt_draft(
+    client_id: int | None, book: Book, currency: Currency, amount: Decimal
+) -> Draft:
+    """A debt from before the bot (agreed on 03.10.2026): only the obligation, no money moves.
+
+    `amount` is signed like an obligation: above zero the client owes us.
+    """
+    if client_id is None:
+        raise ClientRequired()
+    if amount == 0:
+        raise InvalidOperationData("an opening debt is not zero")
+    _check_amount(abs(amount))
+    if book == Book.LOAN and currency != HOME_CURRENCY:
+        raise InvalidOperationData("som loans are in KGS only")
+    return Draft(
+        type=OPENING_DEBT_TYPE[book],
+        entries=(obligation(client_id, book, currency, amount),),
+        client_id=client_id,
         currency=currency,
         amount=amount,
     )

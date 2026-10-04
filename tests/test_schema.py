@@ -253,6 +253,44 @@ async def test_record_check_constraints(
         await insert(session, record(day, owner, **fields))
 
 
+@pytest.mark.parametrize(
+    ("fields", "constraint"),
+    [
+        pytest.param(
+            {"type": OperationType.OPENING_DEBT}, "opening_debt_fields", id="debt-without-client"
+        ),
+        pytest.param(
+            {"type": OperationType.OPENING_LOAN, "currency": KGS},
+            "opening_debt_fields",
+            id="loan-debt-without-client",
+        ),
+        pytest.param(
+            {"type": OperationType.OPENING_DEBT, "amount": D("0")}, "amount_sign", id="zero-debt"
+        ),
+    ],
+)
+async def test_opening_debt_check_constraints(
+    session: AsyncSession, day: BusinessDay, owner: User, fields: dict[str, Any], constraint: str
+) -> None:
+    with pytest.raises(IntegrityError, match=f"ck_operations_{constraint}"):
+        await insert(session, record(day, owner, **fields))
+
+
+async def test_opening_debts_need_a_client_and_som_loans_need_kgs(
+    session: AsyncSession, day: BusinessDay, owner: User, client: Client
+) -> None:
+    we_owe = record(
+        day, owner, type=OperationType.OPENING_DEBT, client_id=client.id, amount=D("-1000")
+    )
+    await insert(session, we_owe)  # a debt carries a sign: we owe the client
+
+    with pytest.raises(IntegrityError, match="ck_operations_opening_debt_fields"):
+        await insert(
+            session,
+            record(day, owner, type=OperationType.OPENING_LOAN, client_id=client.id),  # USD
+        )
+
+
 async def test_opening_and_adjustment_have_no_client(
     session: AsyncSession, day: BusinessDay, owner: User, client: Client
 ) -> None:

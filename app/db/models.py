@@ -234,11 +234,20 @@ class Operation(Base):
             " AND give_amount = get_amount AND received_now AND paid_now)",
             name="exchange_not_empty",
         ),
+        # An adjustment and an opening debt carry a sign; the others are above zero. The type
+        # is compared as text: see migration 0003.
         CheckConstraint(
-            "type = 'exchange'"
-            " OR (type = 'adjustment' AND amount <> 0)"
-            " OR (type <> 'adjustment' AND amount > 0)",
+            "type::text = 'exchange'"
+            " OR (type::text IN ('adjustment', 'opening_debt', 'opening_loan') AND amount <> 0)"
+            " OR (type::text NOT IN ('exchange', 'adjustment', 'opening_debt', 'opening_loan')"
+            " AND amount > 0)",
             name="amount_sign",
+        ),
+        # A debt from before the bot (03.10.2026) has a client; a som loan is in KGS.
+        CheckConstraint(
+            "type::text NOT IN ('opening_debt', 'opening_loan')"
+            " OR (client_id IS NOT NULL AND (type::text = 'opening_debt' OR currency = 'KGS'))",
+            name="opening_debt_fields",
         ),
         CheckConstraint(
             f"type NOT IN {LOAN_TYPES_SQL} OR (currency = 'KGS' AND client_id IS NOT NULL)",

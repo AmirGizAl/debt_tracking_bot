@@ -26,12 +26,14 @@ def inputs(
     exchange: list[Obligation] | None = None,
     loans: list[Obligation] | None = None,
     baseline: dict[Currency, Decimal] | None = None,
+    debts: dict[Currency, Decimal] | None = None,
 ) -> ReportInputs:
     return ReportInputs(
         cash=cash,
         exchange=exchange or [],
         loans=loans or [],
         baseline=BASELINE if baseline is None else baseline,
+        debts=debts or {},
     )
 
 
@@ -174,3 +176,62 @@ def test_snapshot_round_trip() -> None:
     report = build_day_report(DAY_1, {USD: D("87.65"), RUB: D("0.991")}, D("0"))
 
     assert report_from_json(report_to_json(report)) == report
+
+
+# --- opening debts (agreed with the customer on 03.10.2026) -----------------------------------
+
+WITH_DEBTS = inputs(
+    {USD: D("10000"), KGS: D("1000000")},
+    exchange=[Obligation("Азамат", USD, D("1000")), Obligation("Тимур", RUB, D("-30000"))],
+    loans=[Obligation("Бекзат", KGS, D("-20000"))],
+    debts={USD: D("1000"), RUB: D("-30000"), KGS: D("-20000")},
+)
+
+
+@pytest.mark.parametrize(("usd", "rub"), [("87.65", "0.991"), ("1", "1"), ("123.456789", "2")])
+def test_opening_debts_alone_make_no_surplus(usd: str, rub: str) -> None:
+    report = build_day_report(WITH_DEBTS, {USD: D(usd), RUB: D(rub)}, D("0"))
+
+    assert report.surplus == 0
+    assert report.total == report.baseline_total
+
+
+def test_the_starting_point_shows_the_opening_debts() -> None:
+    report = build_day_report(WITH_DEBTS, {USD: D("87.65"), RUB: D("0.991")}, D("0"))
+
+    assert [(b.currency, b.base, b.kgs) for b in report.baseline_debts] == [
+        (USD, D("1000"), D("87650")),
+        (RUB, D("-30000"), D("-29730")),
+        (KGS, D("-20000"), D("-20000")),  # som of both books at rate 1
+    ]
+    assert report.baseline_total == D("876500") + D("1000000") + D("87650") - D("29730") - 20000
+
+
+def test_paid_opening_debt_keeps_the_surplus() -> None:
+    # Азамат paid his 1 000 USD from before the bot: the money replaces the debt.
+    paid = inputs(
+        {USD: D("11000"), KGS: D("1000000")},
+        debts={USD: D("1000")},
+    )
+
+    report = build_day_report(paid, {USD: D("87.65")}, D("0"))
+
+    assert report.surplus == 0
+
+
+def test_a_currency_of_an_opening_debt_needs_a_rate() -> None:
+    # The KZT debt is settled by now, but the starting point still counts it.
+    settled = inputs({KZT: D("500")}, baseline={}, debts={KZT: D("500")})
+
+    assert needed_rates(settled) == [KZT]
+    with pytest.raises(MissingRate):
+        build_day_report(settled, {}, D("0"))
+
+
+def test_snapshot_keeps_the_opening_debts() -> None:
+    report = build_day_report(WITH_DEBTS, {USD: D("87.65"), RUB: D("0.991")}, D("0"))
+    old_snapshot = report_to_json(report)
+    del old_snapshot["baseline_debts"]  # made before 03.10.2026
+
+    assert report_from_json(report_to_json(report)) == report
+    assert report_from_json(old_snapshot).baseline_debts == []

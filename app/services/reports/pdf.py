@@ -272,6 +272,16 @@ def _report_blocks(styles: _Styles, data: DayReportData) -> list[Flowable]:
         )
         for line in report.baseline
     ]
+    result += [
+        (
+            [
+                f"· {texts.baseline_debt_line(line.currency, line.base, line.rate)}",
+                format_amount(line.kgs),
+            ],
+            False,
+        )
+        for line in report.baseline_debts
+    ]
     surplus_index = len(result)
     result += [
         ([texts.RESULT_SURPLUS, format_signed(report.surplus)], False),

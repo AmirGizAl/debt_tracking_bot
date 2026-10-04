@@ -1,7 +1,14 @@
 from aiogram.types import InlineKeyboardMarkup
 
 from app.bot import texts
-from app.bot.callbacks import OpeningAction, OpeningCb, SettingsAction, SettingsCb
+from app.bot.callbacks import (
+    OpeningAction,
+    OpeningCb,
+    OpeningDebtAction,
+    OpeningDebtCb,
+    SettingsAction,
+    SettingsCb,
+)
 from app.bot.keyboards.common import button, home_button, markup
 from app.db.models import User
 
@@ -14,6 +21,7 @@ def settings_menu() -> InlineKeyboardMarkup:
     return markup(
         [button(texts.BTN_HELPERS, _cb(SettingsAction.HELPERS))],
         [button(texts.BTN_OPENING, OpeningCb(action=OpeningAction.SHOW))],
+        [button(texts.BTN_OPENING_DEBTS, OpeningDebtCb(action=OpeningDebtAction.SHOW))],
         [home_button()],
     )
 
